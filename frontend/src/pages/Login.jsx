@@ -5,7 +5,7 @@ import axios from 'axios';
 import { Dna, Lock, Shield, Server, Mail, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api';
 
 export default function Login() {
   const navigate = useNavigate();
