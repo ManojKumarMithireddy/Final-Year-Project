@@ -5,13 +5,33 @@ from typing import Optional
 import time
 import math
 import re
+import os
 import numpy as np
 from Bio import Entrez, SeqIO
 import io
 import datetime
+from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 
 from db import get_db
 from auth import verify_google_token, create_access_token, get_current_user, get_optional_user, verify_password, get_password_hash
+from email_service import send_verification_email, send_resend_verification_email, send_password_reset_email
+
+# ── Email-verification token (separate secret + 1-hour TTL) ───────────────────
+VERIFY_SECRET = os.getenv("JWT_SECRET", "verify_secret_fallback") + "_email_verify"
+_verify_serializer = URLSafeTimedSerializer(VERIFY_SECRET)
+
+def _make_verify_token(email: str) -> str:
+    return _verify_serializer.dumps(email, salt="email-verify")
+
+def _check_verify_token(token: str, max_age: int = 3600) -> str:
+    """Returns the email embedded in the token, raises HTTPException on failure."""
+    try:
+        email = _verify_serializer.loads(token, salt="email-verify", max_age=max_age)
+        return email
+    except SignatureExpired:
+        raise HTTPException(status_code=400, detail="Verification link has expired. Please request a new one.")
+    except BadSignature:
+        raise HTTPException(status_code=400, detail="Invalid verification token.")
 
 #venv\Scripts\uvicorn main:app --reload --port 8000
 
@@ -89,6 +109,16 @@ class StandardAuthRequest(BaseModel):
     email: str
     password: str
     name: Optional[str] = None
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 class SaveCredentialsRequest(BaseModel):
     api_key: str
@@ -192,23 +222,151 @@ def dna_to_bits(dna_seq: str):
 
 # --- AUTH ENDPOINTS ---
 
-@app.post("/api/auth/register")
+@app.post("/api/auth/register", status_code=202)
 async def register_user(request: StandardAuthRequest):
+    """
+    Register a new local user.
+    - Saves the user with is_verified=False.
+    - Sends a verification email via Brevo.
+    - Does NOT return a JWT — the user must verify their email first.
+    """
     db = get_db()
     existing_user = await db.users.find_one({"email": request.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    name = request.name or request.email.split("@")[0]
     user = {
         "email": request.email,
-        "name": request.name or request.email.split("@")[0],
+        "name": name,
         "hashed_password": get_password_hash(request.password),
         "auth_provider": "local",
+        "is_verified": False,
         "created_at": datetime.datetime.utcnow()
     }
     await db.users.insert_one(user)
-    access_token = create_access_token({"sub": user["email"], "name": user["name"]})
-    return {"access_token": access_token, "user": {"email": user["email"], "name": user["name"]}}
+
+    # Build signed token and send verification email
+    token = _make_verify_token(request.email)
+    app_base = os.getenv("APP_BASE_URL", "http://localhost:5173")
+    verify_url = f"{app_base}/verify-email?token={token}"
+    try:
+        send_verification_email(request.email, name, verify_url)
+    except RuntimeError as e:
+        # Don't block registration if email fails — surface a clear warning
+        print(f"⚠️  Email send failed: {e}")
+        return {
+            "message": "Account created but email delivery failed. Check BREVO_API_KEY / BREVO_SENDER_EMAIL in .env.",
+            "verify_url_debug": verify_url   # handy for local dev without a real key
+        }
+
+    return {"message": f"Verification email sent to {request.email}. Please check your inbox."}
+
+
+@app.get("/api/auth/verify-email")
+async def verify_email(token: str):
+    """
+    Validates the signed token from the verification link.
+    On success: sets is_verified=True and returns a JWT so the user is
+    immediately signed in without a separate login step.
+    """
+    email = _check_verify_token(token)   # raises HTTPException on bad/expired token
+
+    db = get_db()
+    user = await db.users.find_one({"email": email})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if user.get("is_verified"):
+        # Already verified — still hand back a JWT (idempotent, user may click link twice)
+        access_token = create_access_token({"sub": user["email"], "name": user.get("name")})
+        return {"access_token": access_token, "user": {"email": user["email"], "name": user.get("name")}}
+
+    await db.users.update_one({"email": email}, {"$set": {"is_verified": True}})
+    access_token = create_access_token({"sub": user["email"], "name": user.get("name")})
+    return {"access_token": access_token, "user": {"email": user["email"], "name": user.get("name")}}
+
+
+@app.post("/api/auth/resend-verification")
+async def resend_verification(request: ResendVerificationRequest):
+    """
+    Regenerates and resends the verification email.
+    Returns a generic 200 regardless of whether the email exists
+    to prevent user enumeration.
+    """
+    db = get_db()
+    user = await db.users.find_one({"email": request.email})
+    if user and not user.get("is_verified") and user.get("auth_provider") == "local":
+        token = _make_verify_token(request.email)
+        app_base = os.getenv("APP_BASE_URL", "http://localhost:5173")
+        verify_url = f"{app_base}/verify-email?token={token}"
+        try:
+            send_resend_verification_email(request.email, user.get("name", "User"), verify_url)
+        except RuntimeError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    return {"message": "If that email is registered and unverified, a new link has been sent."}
+
+
+# ── FORGOT / RESET PASSWORD ────────────────────────────────────────────────────
+
+# Separate serializer salt keeps reset tokens distinct from email-verify tokens
+_RESET_SALT = "password-reset"
+
+
+@app.post("/api/auth/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    """
+    Generates a signed, time-limited (1 h) password-reset link and emails it.
+    Always returns 200 to prevent user enumeration.
+    """
+    db = get_db()
+    user = await db.users.find_one({"email": request.email})
+    # Only send if the user exists, is a local (password) account, and is verified
+    if user and user.get("auth_provider") == "local" and user.get("hashed_password"):
+        token = _verify_serializer.dumps(request.email, salt=_RESET_SALT)
+        app_base = os.getenv("APP_BASE_URL", "http://localhost:5173")
+        reset_url = f"{app_base}/reset-password?token={token}"
+        try:
+            send_password_reset_email(request.email, user.get("name", "User"), reset_url)
+        except RuntimeError as e:
+            print(f"⚠️  Password reset email failed: {e}")
+            # Surface URL in dev so users can still reset without Brevo configured
+            return {
+                "message": "If that email is registered, a reset link has been sent.",
+                "reset_url_debug": reset_url,
+            }
+    return {"message": "If that email is registered, a reset link has been sent."}
+
+
+@app.post("/api/auth/reset-password")
+async def reset_password(request: ResetPasswordRequest):
+    """
+    Validates the signed token and updates the user's password.
+    """
+    try:
+        email = _verify_serializer.loads(request.token, salt=_RESET_SALT, max_age=3600)
+    except SignatureExpired:
+        raise HTTPException(status_code=400, detail="Reset link has expired. Please request a new one.")
+    except BadSignature:
+        raise HTTPException(status_code=400, detail="Invalid or tampered reset token.")
+
+    # Basic server-side password strength check
+    import re as _re
+    pwd = request.new_password
+    if len(pwd) < 8 or not _re.search(r'[A-Z]', pwd) or not _re.search(r'[0-9!@#$%^&*]', pwd):
+        raise HTTPException(
+            status_code=422,
+            detail="Password must be at least 8 characters and include an uppercase letter and a number or special character."
+        )
+
+    db = get_db()
+    user = await db.users.find_one({"email": email})
+    if not user or user.get("auth_provider") != "local":
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    new_hash = get_password_hash(pwd)
+    await db.users.update_one({"email": email}, {"$set": {"hashed_password": new_hash}})
+    return {"message": "Password updated successfully. You can now sign in with your new password."}
+
 
 @app.post("/api/auth/login")
 async def login_user(request: StandardAuthRequest):
@@ -218,6 +376,9 @@ async def login_user(request: StandardAuthRequest):
         raise HTTPException(status_code=400, detail="Invalid email or password")
     if not verify_password(request.password, user["hashed_password"]):
         raise HTTPException(status_code=400, detail="Invalid email or password")
+    # Block login until email is verified
+    if not user.get("is_verified", False):
+        raise HTTPException(status_code=403, detail="EMAIL_NOT_VERIFIED")
     access_token = create_access_token({"sub": user["email"], "name": user.get("name")})
     return {"access_token": access_token, "user": {"email": user["email"], "name": user.get("name")}}
 

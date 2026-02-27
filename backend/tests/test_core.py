@@ -94,3 +94,40 @@ def test_accession_sanitization():
         assert ACCESSION_RE.match(acc),      f"'{acc}' should be valid"
     for acc in invalid:
         assert not ACCESSION_RE.match(acc),  f"'{acc}' should be rejected"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Password-reset token round-trip
+#    Validates that the itsdangerous serializer (same one used in main.py)
+#    correctly encodes and decodes a password-reset token with the
+#    "password-reset" salt, and rejects tampered payloads.
+# ─────────────────────────────────────────────────────────────────────────────
+def test_password_reset_token_roundtrip():
+    """Reset token must encode the email and decode back cleanly; tampering must fail."""
+    from itsdangerous import URLSafeTimedSerializer, BadSignature
+
+    secret = "test_jwt_secret_email_verify"
+    serializer = URLSafeTimedSerializer(secret)
+    salt = "password-reset"
+    email = "user@example.com"
+
+    # Generate and immediately decode (no max_age expiry during test)
+    token = serializer.dumps(email, salt=salt)
+    decoded = serializer.loads(token, salt=salt, max_age=3600)
+    assert decoded == email, f"Expected '{email}', got '{decoded}'"
+
+    # Wrong salt must be rejected
+    try:
+        serializer.loads(token, salt="email-verify", max_age=3600)
+        assert False, "Should have raised BadSignature for wrong salt"
+    except BadSignature:
+        pass  # expected
+
+    # Tampered token must be rejected
+    tampered = token[:-4] + "XXXX"
+    try:
+        serializer.loads(tampered, salt=salt, max_age=3600)
+        assert False, "Should have raised BadSignature for tampered token"
+    except BadSignature:
+        pass  # expected
+

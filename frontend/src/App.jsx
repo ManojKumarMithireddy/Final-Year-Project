@@ -4,6 +4,8 @@ import { LogOut, LayoutDashboard, History as HistoryIcon, Dna } from 'lucide-rea
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import History from './pages/History';
+import VerifyEmail from './pages/VerifyEmail';
+import ResetPassword from './pages/ResetPassword';
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem('token');
@@ -22,7 +24,7 @@ function Navigation() {
     navigate('/login');
   };
 
-  if (location.pathname === '/login') return null;
+  if (location.pathname === '/login' || location.pathname === '/verify-email' || location.pathname === '/reset-password') return null;
 
   return (
     <nav className="bg-slate-950/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-50">
@@ -71,6 +73,8 @@ function App() {
         <main className="flex-1 w-full relative">
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />

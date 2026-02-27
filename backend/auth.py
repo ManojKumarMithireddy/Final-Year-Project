@@ -1,20 +1,19 @@
 import os
 import jwt
 import datetime
+import bcrypt
 from fastapi import Request, HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from google.oauth2 import id_token
 from google.auth.transport import requests
-from passlib.context import CryptContext
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use bcrypt directly to avoid the passlib <1.7.5 + bcrypt >=4.x wrap-bug crash
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
+def get_password_hash(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 jwt_secret = os.getenv("JWT_SECRET", "super_secret_jwt_key_here_change_in_prod")
 jwt_algo = os.getenv("JWT_ALGORITHM", "HS256")
