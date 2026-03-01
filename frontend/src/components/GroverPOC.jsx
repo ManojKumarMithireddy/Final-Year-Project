@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import { Activity, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api';
-const getAuthHeaders = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+import toast from 'react-hot-toast';
+import api from '../lib/api';
+import AmplitudeChart from './AmplitudeChart';
 
 // ── Crypto helpers ────────────────────────────────────────────────────────────
+
 const dnaToBits = (dna) => {
   const map = { A: '00', C: '01', G: '10', T: '11' };
   return dna.split('').map(b => map[b] || '00').join('');
@@ -45,6 +45,7 @@ export default function GroverPOC() {
   const [pocEncryptionState, setPocEncryptionState] = useState(null);
   const [ibmJobId, setIbmJobId] = useState('');
   const [ibmJobStatus, setIbmJobStatus] = useState('');
+  const [activeStep, setActiveStep] = useState(0);   // index into step_circuits
 
   // Derived: chunks for display
   const pocBits = dnaToBits(pocDataset);
@@ -58,7 +59,7 @@ export default function GroverPOC() {
   useEffect(() => {
     const fetchCreds = async () => {
       try {
-        const res = await axios.get(`${API_BASE}/credentials`, getAuthHeaders());
+        const res = await api.get('/credentials');
         if (res.data.ibm_api_key) {
           setIbmApiKey(res.data.ibm_api_key);
           setIbmCrn(res.data.ibm_crn);
@@ -71,21 +72,21 @@ export default function GroverPOC() {
 
   const handleSaveCredentials = async () => {
     try {
-      await axios.post(`${API_BASE}/credentials`, { api_key: ibmApiKey, crn: ibmCrn }, getAuthHeaders());
+      await api.post('/credentials', { api_key: ibmApiKey, crn: ibmCrn });
       setCredsSaved(true);
-      alert('IBM credentials saved successfully.');
+      toast.success('IBM credentials saved successfully.');
     } catch (err) {
-      alert('Failed to save credentials. Are you logged in?');
+      toast.error('Failed to save credentials. Are you logged in?');
     }
   };
 
   const handleRunToy = async () => {
     if (toyBitstring.length !== numQubits || !/^[01]+$/.test(toyBitstring)) {
-      alert(`Target bitstring must be exactly ${numQubits} bits long and contain only 0s and 1s.`);
+      toast.error(`Target bitstring must be exactly ${numQubits} bits long and contain only 0s and 1s.`);
       return;
     }
     if (backendType === 'ibm_cloud' && !credsSaved) {
-      alert('Please save your IBM Cloud credentials before running on the QPU.');
+      toast.error('Please save your IBM Cloud credentials before running on the QPU.');
       return;
     }
 
@@ -101,16 +102,15 @@ export default function GroverPOC() {
 
     try {
       if (backendType === 'simulator') {
-        const res = await axios.post(`${API_BASE}/search/quantum-simulation-poc`,
+        const res = await api.post('/search/quantum-simulation-poc',
           { target_bits: encryptedPayload, noise_level: noiseLevel },
-          getAuthHeaders()
         );
         setToyResult(res.data);
+        setActiveStep(0);
       } else {
         // IBM: credentials fetched server-side — only target_bits sent
-        const res = await axios.post(`${API_BASE}/search/quantum-poc/ibm-submit`,
+        const res = await api.post('/search/quantum-poc/ibm-submit',
           { target_bits: encryptedPayload },
-          getAuthHeaders()
         );
         setIbmJobId(res.data.job_id);
         setIbmJobStatus(res.data.status);
@@ -123,7 +123,7 @@ export default function GroverPOC() {
       }
     } catch (err) {
       const msg = err.response?.data?.detail || 'Error running quantum POC circuit.';
-      alert(msg);
+      toast.error(msg);
     }
     setIsToyRunning(false);
   };
@@ -131,9 +131,8 @@ export default function GroverPOC() {
   const handleRefreshIbmJob = async () => {
     if (!ibmJobId) return;
     try {
-      const res = await axios.post(`${API_BASE}/search/quantum-poc/ibm-status`,
+      const res = await api.post('/search/quantum-poc/ibm-status',
         { job_id: ibmJobId },
-        getAuthHeaders()
       );
       setIbmJobStatus(res.data.status);
       if (res.data.status === 'DONE') {
@@ -144,7 +143,7 @@ export default function GroverPOC() {
         }));
       }
     } catch (err) {
-      alert('Error checking IBM job status.');
+      toast.error('Error checking IBM job status.');
     }
   };
 
@@ -191,7 +190,7 @@ export default function GroverPOC() {
               <div className="mt-6">
                 <label className="block text-sm font-medium text-slate-300 mb-2">
                   Dataset as {numQubits}-qubit Chunks
-                  <span className="text-slate-500 font-normal ml-2">(searching 2<sup>{numQubits}</sup>={2**numQubits} states)</span>
+                  <span className="text-slate-500 font-normal ml-2">(searching 2<sup>{numQubits}</sup>={2 ** numQubits} states)</span>
                 </label>
                 <div className="max-h-56 overflow-y-auto border border-slate-800 rounded-xl bg-slate-950/50">
                   <table className="w-full text-left text-sm text-slate-300">
@@ -229,8 +228,8 @@ export default function GroverPOC() {
                   onChange={(e) => { const v = parseInt(e.target.value); setNumQubits(v); setToyBitstring('0'.repeat(v)); }}
                   className="w-full bg-slate-950/50 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:border-amber-500/50 outline-none transition-all"
                 >
-                  {[2, 3, 4, 5, 6].map(n => (
-                    <option key={n} value={n}>{n} Qubits (searches {2**n} states)</option>
+                  {[2, 4, 6].map(n => (
+                    <option key={n} value={n}>{n} Qubits (searches {2 ** n} states)</option>
                   ))}
                 </select>
               </div>
@@ -407,7 +406,7 @@ export default function GroverPOC() {
                         Server Execution (Blind — sees encrypted bits only)
                         {toyResult.noise_level > 0 && (
                           <span className="ml-auto text-xs text-amber-500/60 font-normal">
-                            noise={( toyResult.noise_level * 100).toFixed(1)}%
+                            noise={(toyResult.noise_level * 100).toFixed(1)}%
                           </span>
                         )}
                       </h3>
@@ -425,17 +424,147 @@ export default function GroverPOC() {
                           <span className="text-white font-mono text-lg">{toyResult.execution_time_ms.toFixed(1)}</span>
                         </div>
                       </div>
-                      {toyResult.circuit_diagram && (
+                      {/* ── Step-by-step circuit navigator ── */}
+                      {toyResult.step_circuits && toyResult.step_circuits.length > 0 ? (
                         <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950">
-                          <div className="p-3 text-slate-500 text-xs flex items-center gap-2 border-b border-slate-800 bg-slate-900/50 uppercase tracking-widest font-medium">
-                            Transpiled Circuit
+                          {/* Step tab bar */}
+                          <div className="flex border-b border-slate-800 bg-slate-900/60 overflow-x-auto">
+                            {toyResult.step_circuits.map((step, idx) => {
+                              const colors = [
+                                'text-blue-400 border-blue-500 bg-blue-500/10',
+                                'text-purple-400 border-purple-500 bg-purple-500/10',
+                                'text-amber-400 border-amber-500 bg-amber-500/10',
+                                'text-emerald-400 border-emerald-500 bg-emerald-500/10',
+                              ];
+                              const inactiveColors = [
+                                'text-slate-400 hover:text-blue-400',
+                                'text-slate-400 hover:text-purple-400',
+                                'text-slate-400 hover:text-amber-400',
+                                'text-slate-400 hover:text-emerald-400',
+                              ];
+                              const isActive = activeStep === idx;
+                              return (
+                                <button
+                                  key={idx}
+                                  onClick={() => setActiveStep(idx)}
+                                  className={`flex-1 min-w-[120px] px-4 py-3 text-xs font-semibold border-b-2 transition-all flex flex-col items-center gap-1 ${isActive
+                                    ? colors[idx]
+                                    : `border-transparent ${inactiveColors[idx]}`
+                                    }`}
+                                >
+                                  <span className="opacity-60 text-[10px] uppercase tracking-wider">Step {step.step}</span>
+                                  <span>{step.label}</span>
+                                </button>
+                              );
+                            })}
                           </div>
-                          <div className="p-5 overflow-x-auto">
-                            <pre className="text-[10px] text-amber-500/70 leading-tight">
-                              {toyResult.circuit_diagram}
-                            </pre>
-                          </div>
+
+                          {/* Active step content */}
+                          <AnimatePresence mode="wait">
+                            {toyResult.step_circuits.map((step, idx) =>
+                              activeStep === idx ? (
+                                <motion.div
+                                  key={idx}
+                                  initial={{ opacity: 0, y: 6 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, y: -6 }}
+                                  transition={{ duration: 0.18 }}
+                                >
+                                  {/* Description banner */}
+                                  <div className="px-5 pt-4 pb-3 text-xs text-slate-400 leading-relaxed border-b border-slate-800/60">
+                                    {step.description}
+                                  </div>
+
+                                  {/* Stack vertically: circuit top, gate cards bottom */}
+                                  <div className="flex flex-col">
+                                    <div className="p-5 overflow-x-auto border-b border-slate-800/60 pb-8">
+                                      <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-4 font-medium flex items-center justify-between">
+                                        <span>Composed Circuit Diagram</span>
+                                        <span className="text-amber-500/80 normal-case font-normal bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">Active step highlighted</span>
+                                      </div>
+                                      <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 shadow-inner overflow-x-auto">
+                                        <div className="flex flex-row items-center pointer-events-none w-max">
+                                          {toyResult.step_circuits.map((s, idx) => (
+                                            <pre
+                                              key={`diagram-part-${idx}`}
+                                              className={`text-[10px] leading-[11px] m-0 p-0 transition-all duration-300 ${idx === activeStep
+                                                ? 'text-amber-400 drop-shadow-[0_0_12px_rgba(251,191,36,0.8)]'
+                                                : 'text-slate-300 opacity-30'
+                                                }`}
+                                            >
+                                              {s.diagram}
+                                            </pre>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Gate explanation cards */}
+                                    {step.gates && step.gates.length > 0 && (
+                                      <div className="p-5 space-y-4 bg-slate-900/40">
+                                        <div className="text-[10px] text-slate-500 uppercase tracking-widest font-medium mb-2">
+                                          Gates Used in This Step
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                          {step.gates.map((gate, gi) => {
+                                            const gateColors = [
+                                              { badge: 'bg-blue-500/20 text-blue-400 border-blue-500/30', card: 'border-blue-500/20 bg-blue-950/20' },
+                                              { badge: 'bg-purple-500/20 text-purple-400 border-purple-500/30', card: 'border-purple-500/20 bg-purple-950/20' },
+                                              { badge: 'bg-amber-500/20 text-amber-400 border-amber-500/30', card: 'border-amber-500/20 bg-amber-950/20' },
+                                              { badge: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', card: 'border-emerald-500/20 bg-emerald-950/20' },
+                                            ];
+                                            const c = gateColors[gi % gateColors.length];
+                                            return (
+                                              <div key={gi} className={`rounded-xl border p-3 ${c.card}`}>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                  <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md border ${c.badge}`}>
+                                                    {gate.symbol}
+                                                  </span>
+                                                  <div className="flex-1 min-w-0">
+                                                    <div className="text-xs font-semibold text-slate-200 truncate">{gate.name}</div>
+                                                    <div className="text-[10px] text-slate-500">×{gate.count} application{gate.count !== 1 ? 's' : ''}</div>
+                                                  </div>
+                                                </div>
+                                                <p className="text-[10px] text-slate-400 leading-relaxed">
+                                                  {gate.explanation}
+                                                </p>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Dynamic amplitude chart */}
+                                  {step.probabilities && (
+                                    <div className="px-5 py-4 border-t border-slate-800/60">
+                                      <AmplitudeChart
+                                        probabilities={step.probabilities}
+                                        targetBits={pocEncryptionState?.encrypted || toyBitstring}
+                                        stepIndex={idx}
+                                      />
+                                    </div>
+                                  )}
+                                </motion.div>
+                              ) : null
+                            )}
+                          </AnimatePresence>
                         </div>
+                      ) : (
+                        /* Fallback: full circuit (IBM path) */
+                        toyResult.circuit_diagram && (
+                          <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950">
+                            <div className="p-3 text-slate-500 text-xs flex items-center gap-2 border-b border-slate-800 bg-slate-900/50 uppercase tracking-widest font-medium">
+                              Transpiled Circuit
+                            </div>
+                            <div className="p-5 overflow-x-auto">
+                              <pre className="text-[10px] text-amber-500/70 leading-tight">
+                                {toyResult.circuit_diagram}
+                              </pre>
+                            </div>
+                          </div>
+                        )
                       )}
                     </div>
                   </motion.div>

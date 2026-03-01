@@ -10,3 +10,7 @@ db = client.bioquantum_hybrid_search
 
 def get_db():
     return db
+
+def close_db():
+    """Gracefully close the MongoDB connection (call on app shutdown)."""
+    client.close()

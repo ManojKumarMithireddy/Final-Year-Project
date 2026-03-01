@@ -36,8 +36,11 @@ def verify_google_token(token: str):
 
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.datetime.utcnow() + datetime.timedelta(days=7)
-    to_encode.update({"exp": expire})
+    now = datetime.datetime.now(datetime.timezone.utc)
+    to_encode.update({
+        "exp": now + datetime.timedelta(minutes=30),
+        "iat": now,
+    })
     encoded_jwt = jwt.encode(to_encode, jwt_secret, algorithm=jwt_algo)
     return encoded_jwt
 
@@ -59,5 +62,5 @@ def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Depe
     try:
         payload = jwt.decode(credentials.credentials, jwt_secret, algorithms=[jwt_algo])
         return payload
-    except:
+    except Exception:
         return None

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
 import axios from 'axios';
-import { Dna, Lock, Mail, ArrowRight, MailCheck, RefreshCw, KeyRound } from 'lucide-react';
+import { Dna, Lock, Mail, ArrowRight, MailCheck, RefreshCw, KeyRound, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api';
@@ -40,6 +40,7 @@ export default function Login() {
   const [formData, setFormData] = useState({ email: '', password: '', name: '' });
   const [touched, setTouched] = useState({ email: false, password: false, name: false });
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   // "Check your inbox" state — shown after successful registration
   const [pendingEmail, setPendingEmail] = useState('');
@@ -77,12 +78,14 @@ export default function Login() {
   };
 
   const handleGoogleSuccess = async (credentialResponse) => {
+    setGoogleLoading(true);
     try {
       const res = await axios.post(`${API_BASE}/auth/google`, {
         token: credentialResponse.credential,
       });
       localStorage.setItem('token', res.data.access_token);
       localStorage.setItem('userName', res.data.user.name);
+      localStorage.setItem('loginTimestamp', Date.now().toString());
       navigate('/');
     } catch (err) {
       setServerError(
@@ -91,6 +94,8 @@ export default function Login() {
           : 'Failed to authenticate with server. Is the backend running?'
       );
       console.error(err);
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -116,6 +121,7 @@ export default function Login() {
       // Login success
       localStorage.setItem('token', res.data.access_token);
       localStorage.setItem('userName', res.data.user.name || formData.email.split('@')[0]);
+      localStorage.setItem('loginTimestamp', Date.now().toString());
       navigate('/');
     } catch (err) {
       const detail = err.response?.data?.detail;
@@ -273,6 +279,27 @@ export default function Login() {
             </button>
           </motion.div>
         </div>
+      </div>
+    );
+  }
+
+  // ── Google auth loading overlay ──────────────────────────────────────────────
+  if (googleLoading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden bg-slate-950">
+        <div className="absolute top-0 left-0 w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[120px] -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
+        <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[120px] translate-x-1/2 translate-y-1/2 pointer-events-none" />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="relative z-10 flex flex-col items-center gap-6"
+        >
+          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20">
+            <Dna className="w-10 h-10 text-white" />
+          </div>
+          <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
+          <p className="text-slate-400 text-sm font-medium tracking-wide">Signing you in…</p>
+        </motion.div>
       </div>
     );
   }

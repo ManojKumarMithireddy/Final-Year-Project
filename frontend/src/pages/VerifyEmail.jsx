@@ -28,6 +28,7 @@ export default function VerifyEmail() {
       .then((res) => {
         localStorage.setItem('token', res.data.access_token);
         localStorage.setItem('userName', res.data.user.name || res.data.user.email);
+        localStorage.setItem('loginTimestamp', Date.now().toString());
         setStatus('success');
         // Auto-redirect after 3 seconds
         setTimeout(() => navigate('/'), 3000);

@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { Search, Server } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
+import api from '../lib/api';
 import ComplexityChart from './ComplexityChart';
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api';
-const getAuthHeaders = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
 
 export default function HybridSearchPanel() {
   const [accession, setAccession] = useState('NM_007294');
@@ -22,31 +20,31 @@ export default function HybridSearchPanel() {
     setClassicalResult(null);
     setQuantumMetrics(null);
     try {
-      const res = await axios.get(`${API_BASE}/sequence/${accession}`, getAuthHeaders());
+      const res = await api.get(`/sequence/${accession}`);
       setDatasetData(res.data);
     } catch (err) {
       const msg = err.response?.data?.detail || 'Error fetching dataset. Check ID or network connection.';
-      alert(msg);
+      toast.error(msg);
     }
     setIsFetching(false);
   };
 
   const handleSearch = async () => {
-    if (!datasetData) return alert('Fetch a dataset first!');
+    if (!datasetData) { toast.error('Fetch a dataset first!'); return; }
     setIsSearching(true);
     try {
-      const cRes = await axios.post(`${API_BASE}/search/classical`, {
+      const cRes = await api.post('/search/classical', {
         dataset: datasetData.sequence,
-        target: targetKmer
-      }, getAuthHeaders());
+        target: targetKmer,
+      });
       setClassicalResult(cRes.data);
 
-      const qRes = await axios.post(`${API_BASE}/search/quantum-simulation`, {
-        n_windows: cRes.data.n_windows
-      }, getAuthHeaders());
+      const qRes = await api.post('/search/quantum-simulation', {
+        n_windows: cRes.data.n_windows,
+      });
       setQuantumMetrics(qRes.data);
     } catch (err) {
-      alert('Error running search.');
+      toast.error('Error running search.');
     }
     setIsSearching(false);
   };
