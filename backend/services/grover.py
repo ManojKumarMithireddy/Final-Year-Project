@@ -6,6 +6,7 @@ Grover search QuantumCircuits for a given target bitstring.
 """
 
 import numpy as np
+from functools import lru_cache
 from qiskit import QuantumCircuit
 
 
@@ -65,6 +66,7 @@ def build_grover_circuit(target_bitstring: str):
     return qc, iterations
 
 
+@lru_cache(maxsize=64)
 def build_grover_step_circuits(target_bitstring: str) -> list:
     """
     Builds 4 isolated QuantumCircuit objects — one per Grover phase — and

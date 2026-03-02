@@ -1,4 +1,5 @@
 import os
+import logging
 import jwt
 import datetime
 import bcrypt
@@ -8,6 +9,8 @@ from typing import Optional
 from google.oauth2 import id_token
 from google.auth.transport import requests
 
+logger = logging.getLogger(__name__)
+
 # Use bcrypt directly to avoid the passlib <1.7.5 + bcrypt >=4.x wrap-bug crash
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
@@ -15,7 +18,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-jwt_secret = os.getenv("JWT_SECRET", "super_secret_jwt_key_here_change_in_prod")
+# ── Fail fast if JWT_SECRET is not set — prevents accidental deployment with a known key ──
+_jwt_secret_env = os.getenv("JWT_SECRET", "")
+if not _jwt_secret_env:
+    raise RuntimeError(
+        "JWT_SECRET environment variable is not set. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
+jwt_secret = _jwt_secret_env
 jwt_algo = os.getenv("JWT_ALGORITHM", "HS256")
 google_client_id = os.getenv("GOOGLE_CLIENT_ID", "")
 
@@ -31,7 +41,7 @@ def verify_google_token(token: str):
         )
         return idinfo
     except Exception as e:
-        print(f"GOOGLE TOKEN VERIFICATION ERROR: {e}")
+        logger.error("Google token verification failed: %s", e)
         raise ValueError(f"Google Token Error: {e}")
 
 def create_access_token(data: dict):

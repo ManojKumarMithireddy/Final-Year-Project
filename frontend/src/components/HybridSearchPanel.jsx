@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Search, Server } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -13,8 +13,18 @@ export default function HybridSearchPanel() {
   const [isSearching, setIsSearching] = useState(false);
   const [classicalResult, setClassicalResult] = useState(null);
   const [quantumMetrics, setQuantumMetrics] = useState(null);
+  const abortRef = useRef(null);
+
+  // Cancel any in-flight request when component unmounts
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const handleFetchDataset = async () => {
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
     setIsFetching(true);
     setDatasetData(null);
     setClassicalResult(null);
@@ -23,14 +33,19 @@ export default function HybridSearchPanel() {
       const res = await api.get(`/sequence/${accession}`);
       setDatasetData(res.data);
     } catch (err) {
-      const msg = err.response?.data?.detail || 'Error fetching dataset. Check ID or network connection.';
+      const msg =
+        err.response?.data?.detail ||
+        'Error fetching dataset. Check ID or network connection.';
       toast.error(msg);
     }
     setIsFetching(false);
   };
 
   const handleSearch = async () => {
-    if (!datasetData) { toast.error('Fetch a dataset first!'); return; }
+    if (!datasetData) {
+      toast.error('Fetch a dataset first!');
+      return;
+    }
     setIsSearching(true);
     try {
       const cRes = await api.post('/search/classical', {
@@ -63,7 +78,9 @@ export default function HybridSearchPanel() {
 
           <div className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-slate-400 mb-1.5">NCBI Accession ID</label>
+              <label className="block text-sm font-medium text-slate-400 mb-1.5">
+                NCBI Accession ID
+              </label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -75,8 +92,7 @@ export default function HybridSearchPanel() {
                 <button
                   onClick={handleFetchDataset}
                   disabled={isFetching}
-                  className="bg-blue-600 hover:bg-blue-500 px-5 py-2.5 rounded-xl font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
-                >
+                  className="bg-blue-600 hover:bg-blue-500 px-5 py-2.5 rounded-xl font-medium transition-colors disabled:opacity-50 whitespace-nowrap">
                   {isFetching ? 'Fetching...' : 'Fetch'}
                 </button>
               </div>
@@ -88,13 +104,17 @@ export default function HybridSearchPanel() {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="bg-emerald-900/10 p-4 rounded-xl border border-emerald-500/20"
-                >
+                  className="bg-emerald-900/10 p-4 rounded-xl border border-emerald-500/20">
                   <div className="text-sm text-emerald-400 mb-1.5 font-medium flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Data Loaded
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />{' '}
+                    Data Loaded
                   </div>
                   <div className="text-xs text-slate-400">
-                    Total Bases: <span className="text-white font-mono">{datasetData.length.toLocaleString()}</span> bp
+                    Total Bases:{' '}
+                    <span className="text-white font-mono">
+                      {datasetData.length.toLocaleString()}
+                    </span>{' '}
+                    bp
                   </div>
                   <div className="text-xs text-slate-500 mt-2 truncate font-mono bg-black/20 p-2 rounded">
                     {datasetData.sequence.substring(0, 40)}...
@@ -104,7 +124,9 @@ export default function HybridSearchPanel() {
             </AnimatePresence>
 
             <div>
-              <label className="block text-sm font-medium text-slate-400 mb-1.5">Target k-mer Pattern</label>
+              <label className="block text-sm font-medium text-slate-400 mb-1.5">
+                Target k-mer Pattern
+              </label>
               <input
                 type="text"
                 value={targetKmer}
@@ -118,11 +140,12 @@ export default function HybridSearchPanel() {
           <button
             onClick={handleSearch}
             disabled={isSearching || !datasetData}
-            className="w-full mt-6 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:grayscale relative overflow-hidden group"
-          >
+            className="w-full mt-6 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:grayscale relative overflow-hidden group">
             <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform" />
             <Search className="w-5 h-5 relative z-10" />
-            <span className="relative z-10">{isSearching ? 'Computing...' : 'Run Hybrid Search'}</span>
+            <span className="relative z-10">
+              {isSearching ? 'Computing...' : 'Run Hybrid Search'}
+            </span>
           </button>
         </div>
       </div>
@@ -133,27 +156,44 @@ export default function HybridSearchPanel() {
           {/* Classical Result */}
           <div className="bg-slate-900/60 rounded-3xl p-6 border border-slate-800 shadow-2xl relative overflow-hidden group">
             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-[40px] group-hover:bg-blue-500/20 transition-colors" />
-            <h3 className="text-lg font-semibold text-white mb-1">Classical Reality</h3>
-            <p className="text-xs text-slate-400 mb-6">Actual Python sliding window execution</p>
+            <h3 className="text-lg font-semibold text-white mb-1">
+              Classical Reality
+            </h3>
+            <p className="text-xs text-slate-400 mb-6">
+              Actual Python sliding window execution
+            </p>
             {classicalResult ? (
               <div className="space-y-4 relative z-10">
                 <div>
-                  <div className="text-sm text-slate-400 mb-1">Search Space (Windows)</div>
-                  <div className="text-3xl font-mono text-white tracking-tight">{classicalResult.n_windows.toLocaleString()}</div>
+                  <div className="text-sm text-slate-400 mb-1">
+                    Search Space (Windows)
+                  </div>
+                  <div className="text-3xl font-mono text-white tracking-tight">
+                    {classicalResult.n_windows.toLocaleString()}
+                  </div>
                 </div>
                 <div>
-                  <div className="text-sm text-slate-400 mb-1">Required Queries O(N)</div>
-                  <div className="text-2xl font-mono text-blue-400 tracking-tight">{classicalResult.classical_queries.toLocaleString()}</div>
+                  <div className="text-sm text-slate-400 mb-1">
+                    Required Queries O(N)
+                  </div>
+                  <div className="text-2xl font-mono text-blue-400 tracking-tight">
+                    {classicalResult.classical_queries.toLocaleString()}
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-4">
                   <div className="bg-slate-950/50 border border-slate-800/50 p-4 rounded-2xl">
-                    <div className="text-xs text-slate-500 mb-1">Matches Found</div>
-                    <div className="text-xl font-semibold text-emerald-400">{classicalResult.matches.length}</div>
+                    <div className="text-xs text-slate-500 mb-1">
+                      Matches Found
+                    </div>
+                    <div className="text-xl font-semibold text-emerald-400">
+                      {classicalResult.matches.length}
+                    </div>
                   </div>
                   <div className="bg-slate-950/50 border border-slate-800/50 p-4 rounded-2xl">
                     <div className="text-xs text-slate-500 mb-1">Exec Time</div>
                     <div className="text-xl font-semibold text-slate-300">
-                      {classicalResult.execution_time_ms.toFixed(1)} <span className="text-sm text-slate-500">ms</span>
+                      {classicalResult.execution_time_ms.toFixed(1)}{' '}
+                      <span className="text-sm text-slate-500">ms</span>
                     </div>
                   </div>
                 </div>
@@ -168,25 +208,39 @@ export default function HybridSearchPanel() {
           {/* Quantum Theory */}
           <div className="bg-slate-900/60 rounded-3xl p-6 border border-slate-800 shadow-2xl relative overflow-hidden group">
             <div className="absolute -bottom-10 -right-10 w-48 h-48 bg-purple-500/10 rounded-full blur-[50px] group-hover:bg-purple-500/20 transition-colors" />
-            <h3 className="text-lg font-semibold text-white mb-1">Quantum Theory</h3>
-            <p className="text-xs text-slate-400 mb-1">Theoretical Grover's oracle calls O(√N)</p>
+            <h3 className="text-lg font-semibold text-white mb-1">
+              Quantum Theory
+            </h3>
+            <p className="text-xs text-slate-400 mb-1">
+              Theoretical Grover's oracle calls O(√N)
+            </p>
             <p className="text-xs text-amber-500/70 mb-6 italic">
               ⚠ Analytically derived — not measured from a circuit of size N
             </p>
             {quantumMetrics ? (
               <div className="space-y-5 relative z-10">
                 <div>
-                  <div className="text-sm text-slate-400 mb-1">Required Oracle Calls O(√N)</div>
-                  <div className="text-4xl font-mono text-purple-400 tracking-tight">{quantumMetrics.quantum_queries.toLocaleString()}</div>
+                  <div className="text-sm text-slate-400 mb-1">
+                    Required Oracle Calls O(√N)
+                  </div>
+                  <div className="text-4xl font-mono text-purple-400 tracking-tight">
+                    {quantumMetrics.quantum_queries.toLocaleString()}
+                  </div>
                 </div>
                 <div className="bg-gradient-to-br from-purple-900/40 to-blue-900/20 border border-purple-500/30 p-5 rounded-2xl backdrop-blur-sm">
-                  <div className="text-sm text-purple-300 mb-2 font-medium">Scaling Advantage</div>
+                  <div className="text-sm text-purple-300 mb-2 font-medium">
+                    Scaling Advantage
+                  </div>
                   <div className="text-2xl font-bold text-white mb-2 flex items-baseline gap-2">
                     {quantumMetrics.advantage_ratio.toLocaleString()}x
-                    <span className="text-sm font-normal text-purple-200/60">fewer oracle calls</span>
+                    <span className="text-sm font-normal text-purple-200/60">
+                      fewer oracle calls
+                    </span>
                   </div>
                   <div className="text-xs text-slate-400">
-                    Classical requires {classicalResult.classical_queries.toLocaleString()} comparisons
+                    Classical requires{' '}
+                    {classicalResult.classical_queries.toLocaleString()}{' '}
+                    comparisons
                   </div>
                 </div>
               </div>
@@ -201,12 +255,18 @@ export default function HybridSearchPanel() {
         {/* Chart */}
         <div className="bg-slate-900/60 rounded-3xl p-6 border border-slate-800 shadow-2xl flex-1 flex flex-col min-h-[400px]">
           <div className="mb-6">
-            <h3 className="text-lg font-semibold text-white">Complexity Divergence</h3>
+            <h3 className="text-lg font-semibold text-white">
+              Complexity Divergence
+            </h3>
             <p className="text-xs text-slate-500 mt-1">
-              Classical O(N) vs. Theoretical Grover O(√N) — values are analytically computed, not experimentally measured
+              Classical O(N) vs. Theoretical Grover O(√N) — values are
+              analytically computed, not experimentally measured
             </p>
           </div>
-          <ComplexityChart classicalResult={classicalResult} quantumMetrics={quantumMetrics} />
+          <ComplexityChart
+            classicalResult={classicalResult}
+            quantumMetrics={quantumMetrics}
+          />
         </div>
       </div>
     </div>

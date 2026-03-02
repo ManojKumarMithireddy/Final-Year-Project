@@ -15,6 +15,7 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
 from db import get_db
 from auth import get_current_user, get_optional_user
+from crypto import decrypt_value
 from models.schemas import QuantumToyRequest, IBMSubmitRequest, IBMStatusRequest
 from services.grover import build_grover_circuit, build_grover_step_circuits
 
@@ -96,6 +97,28 @@ async def quantum_toy(request: QuantumToyRequest, current_user: Optional[dict] =
     return result_data
 
 
+@router.get("/circuit-info")
+async def circuit_info(target_bits: str = "0000"):
+    """
+    Returns the Grover circuit diagram and step-by-step data for a given
+    target bitstring WITHOUT running a simulation. Used by the History page
+    to visualize past results on demand.
+    """
+    if not target_bits or not all(c in '01' for c in target_bits) or len(target_bits) > 8:
+        raise HTTPException(status_code=400, detail="target_bits must be 1-8 characters of 0/1.")
+
+    qc, iterations = build_grover_circuit(target_bits)
+    circuit_diagram = str(qc.draw(output="text", fold=-1))
+    step_circuits = build_grover_step_circuits(target_bits)
+
+    return {
+        "circuit_diagram": circuit_diagram,
+        "step_circuits": step_circuits,
+        "iterations": iterations,
+        "qubits": len(target_bits),
+    }
+
+
 @router.post("/quantum-poc/ibm-submit")
 async def ibm_submit_job(request: IBMSubmitRequest, current_user: dict = Depends(get_current_user)):
     """
@@ -118,7 +141,7 @@ async def ibm_submit_job(request: IBMSubmitRequest, current_user: dict = Depends
     try:
         service = QiskitRuntimeService(
             channel="ibm_cloud",
-            token=creds["ibm_api_key"],
+            token=decrypt_value(creds["ibm_api_key"]),
             instance=creds["ibm_crn"],
         )
         backend = service.least_busy(operational=True, simulator=False)
@@ -175,7 +198,7 @@ async def ibm_job_status(request: IBMStatusRequest, current_user: dict = Depends
     try:
         service = QiskitRuntimeService(
             channel="ibm_cloud",
-            token=creds["ibm_api_key"],
+            token=decrypt_value(creds["ibm_api_key"]),
             instance=creds["ibm_crn"],
         )
         job = service.job(request.job_id)

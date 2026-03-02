@@ -1,13 +1,17 @@
 """
 Auth router — registration, login, Google OAuth, email verification,
 forgot / reset password endpoints.
+
+Rate limiting (via SlowAPI):
+  - POST /register : 5 requests/minute per IP
+  - POST /login    : 10 requests/minute per IP
 """
 
 import os
-import re
+import logging
 import datetime
-from fastapi import APIRouter, HTTPException
-
+from fastapi import APIRouter, HTTPException, Request
+import re
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 
 from db import get_db
@@ -17,8 +21,10 @@ from auth import (
     get_password_hash,
     verify_password,
 )
+from rate_limit import limiter
 from models.schemas import (
     GoogleLoginRequest,
+    RegisterRequest,
     StandardAuthRequest,
     ResendVerificationRequest,
     ForgotPasswordRequest,
@@ -62,23 +68,23 @@ def _check_verify_token(token: str, max_age: int = 3600) -> str:
 # ── Registration ──────────────────────────────────────────────────────────────
 
 @router.post("/register", status_code=202)
-async def register_user(request: StandardAuthRequest):
+@limiter.limit("5/minute")
+async def register_user(request: Request, body: RegisterRequest):
     """
-    Register a new local user.
-    - Saves the user with is_verified=False.
+    Register a new local user.    - Password strength is enforced by RegisterRequest's field validator.    - Saves the user with is_verified=False.
     - Sends a verification email via Brevo.
     - Does NOT return a JWT — the user must verify their email first.
     """
     db = get_db()
-    existing_user = await db.users.find_one({"email": request.email})
+    existing_user = await db.users.find_one({"email": body.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    name = request.name or request.email.split("@")[0]
+    name = body.name or body.email.split("@")[0]
     user = {
-        "email": request.email,
+        "email": body.email,
         "name": name,
-        "hashed_password": get_password_hash(request.password),
+        "hashed_password": get_password_hash(body.password),
         "auth_provider": "local",
         "is_verified": False,
         "created_at": datetime.datetime.now(datetime.timezone.utc),
@@ -86,20 +92,20 @@ async def register_user(request: StandardAuthRequest):
     await db.users.insert_one(user)
 
     # Build signed token and send verification email
-    token = _make_verify_token(request.email)
+    token = _make_verify_token(body.email)
     app_base = os.getenv("APP_BASE_URL", "http://localhost:5173")
     verify_url = f"{app_base}/verify-email?token={token}"
     try:
-        send_verification_email(request.email, name, verify_url)
+        send_verification_email(body.email, name, verify_url)
     except RuntimeError as e:
         # Don't block registration if email fails — surface a clear warning
-        print(f"⚠️  Email send failed: {e}")
+        logger.warning("Email send failed during registration: %s", e)
         return {
             "message": "Account created but email delivery failed. Check BREVO_API_KEY / BREVO_SENDER_EMAIL in .env.",
             "verify_url_debug": verify_url,   # handy for local dev without a real key
         }
 
-    return {"message": f"Verification email sent to {request.email}. Please check your inbox."}
+    return {"message": f"Verification email sent to {body.email}. Please check your inbox."}
 
 
 # ── Email verification ────────────────────────────────────────────────────────
@@ -147,7 +153,7 @@ async def resend_verification(request: ResendVerificationRequest):
     return {"message": "If that email is registered and unverified, a new link has been sent."}
 
 
-# ── Forgot / Reset Password ──────────────────────────────────────────────────
+# ── Forgot / Reset Password ───────────────────────────────────────────
 
 @router.post("/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest):
@@ -165,7 +171,7 @@ async def forgot_password(request: ForgotPasswordRequest):
         try:
             send_password_reset_email(request.email, user.get("name", "User"), reset_url)
         except RuntimeError as e:
-            print(f"⚠️  Password reset email failed: {e}")
+            logger.warning("Password reset email failed: %s", e)
             # Surface URL in dev so users can still reset without Brevo configured
             return {
                 "message": "If that email is registered, a reset link has been sent.",
@@ -176,7 +182,10 @@ async def forgot_password(request: ForgotPasswordRequest):
 
 @router.post("/reset-password")
 async def reset_password(request: ResetPasswordRequest):
-    """Validates the signed token and updates the user's password."""
+    """
+    Validates the signed token and updates the user's password.
+    Password strength is enforced at schema level by ResetPasswordRequest.new_password validator.
+    """
     try:
         email = _verify_serializer.loads(request.token, salt=_RESET_SALT, max_age=3600)
     except SignatureExpired:
@@ -184,20 +193,13 @@ async def reset_password(request: ResetPasswordRequest):
     except BadSignature:
         raise HTTPException(status_code=400, detail="Invalid or tampered reset token.")
 
-    # Basic server-side password strength check
-    pwd = request.new_password
-    if len(pwd) < 8 or not _UPPERCASE_RE.search(pwd) or not _SPECIAL_RE.search(pwd):
-        raise HTTPException(
-            status_code=422,
-            detail="Password must be at least 8 characters and include an uppercase letter and a number or special character.",
-        )
-
+    # Password strength is enforced at schema level (ResetPasswordRequest.new_password validator)
     db = get_db()
     user = await db.users.find_one({"email": email})
     if not user or user.get("auth_provider") != "local":
         raise HTTPException(status_code=404, detail="User not found.")
 
-    new_hash = get_password_hash(pwd)
+    new_hash = get_password_hash(request.new_password)
     await db.users.update_one({"email": email}, {"$set": {"hashed_password": new_hash}})
     return {"message": "Password updated successfully. You can now sign in with your new password."}
 
@@ -205,12 +207,13 @@ async def reset_password(request: ResetPasswordRequest):
 # ── Login ─────────────────────────────────────────────────────────────────────
 
 @router.post("/login")
-async def login_user(request: StandardAuthRequest):
+@limiter.limit("10/minute")
+async def login_user(request: Request, body: StandardAuthRequest):
     db = get_db()
-    user = await db.users.find_one({"email": request.email})
+    user = await db.users.find_one({"email": body.email})
     if not user or "hashed_password" not in user:
         raise HTTPException(status_code=400, detail="Invalid email or password")
-    if not verify_password(request.password, user["hashed_password"]):
+    if not verify_password(body.password, user["hashed_password"]):
         raise HTTPException(status_code=400, detail="Invalid email or password")
     # Block login until email is verified
     if not user.get("is_verified", False):

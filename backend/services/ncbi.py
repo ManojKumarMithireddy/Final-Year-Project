@@ -5,16 +5,29 @@ NCBI sequence fetching and DNA encoding utilities.
 import os
 import re
 import io
+import logging
 from Bio import Entrez, SeqIO
+
+logger = logging.getLogger(__name__)
 
 # --- ACCESSION VALIDATION ---
 # Only allow safe NCBI accession formats (e.g. NM_007294, AF123456.1)
 ACCESSION_RE = re.compile(r'^[A-Za-z0-9_.\-]{1,30}$')
 
 # --- NCBI CONFIGURATION ---
-# Read from env var to comply with NCBI terms of service.
-# See: https://www.ncbi.nlm.nih.gov/books/NBK25497/#chapter2.Usage_Guidelines_and_Requiremen
-Entrez.email = os.getenv("NCBI_EMAIL", "bioquantum.capstone@example.com")
+# NCBI Terms of Service require a real contact email.
+# Warn loudly at startup if the placeholder is still in use.
+_ncbi_email = os.getenv("NCBI_EMAIL", "")
+if not _ncbi_email:
+    logger.warning(
+        "NCBI_EMAIL is not set. NCBI Terms of Service require a real email address. "
+        "Set NCBI_EMAIL in your .env file."
+    )
+    _ncbi_email = "bioquantum.capstone@example.com"  # fallback for dev only
+Entrez.email = _ncbi_email
+
+# 10-second timeout on all NCBI requests to prevent hung workers.
+Entrez.timeout = int(os.getenv("NCBI_TIMEOUT", "10"))
 
 
 def fetch_sequence(accession_id: str):
@@ -26,7 +39,7 @@ def fetch_sequence(accession_id: str):
         record = SeqIO.read(io.StringIO(raw_fasta), "fasta")
         return str(record.seq[:100000]).upper()
     except Exception as e:
-        print(f"NCBI Exception: {e}")
+        logger.error("NCBI fetch failed for accession '%s': %s", accession_id, e)
         return None
 
 

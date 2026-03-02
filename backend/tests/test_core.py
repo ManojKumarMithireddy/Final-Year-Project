@@ -2,9 +2,6 @@ import pytest
 import math
 import numpy as np
 
-# ── bootstrap sys.path so we can import backend modules ──────────────────────
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

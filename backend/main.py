@@ -6,13 +6,26 @@ All endpoint logic lives in the routers/ package.
 """
 
 import os
+import logging
 import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from db import close_db
+from rate_limit import limiter
+
+# ── Structured logging ────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 from routers.auth import router as auth_router
@@ -45,24 +58,28 @@ async def lifespan(app: FastAPI):
             local_time = datetime.datetime.now(tz=timezone.utc)
             delta = abs((ntp_time - local_time).total_seconds())
             if delta > 5:
-                print(f"⚠️  WARNING: System clock is {delta:.1f}s off NTP. Google token auth may fail.")
+                logger.warning("System clock is %.1fs off NTP. Google token auth may fail.", delta)
             else:
-                print(f"✅  Clock sync OK: {delta:.2f}s from NTP (pool.ntp.org)")
+                logger.info("Clock sync OK: %.2fs from NTP (pool.ntp.org)", delta)
         except Exception as e:
-            print(f"⚠️  NTP check failed (non-critical): {e}")
+            logger.warning("NTP check failed (non-critical): %s", e)
     else:
-        print("ℹ️  ntplib not installed — clock skew check skipped. Install with: pip install ntplib")
+        logger.info("ntplib not installed — clock skew check skipped. Install with: pip install ntplib")
 
     yield  # ── App is running ──
 
     # ── Shutdown ──────────────────────────────────────────────────────────
     close_db()
-    print("✅  MongoDB connection closed.")
+    logger.info("MongoDB connection closed.")
 
 
 # ── App factory ───────────────────────────────────────────────────────────────
 
 app = FastAPI(title="BioQuantum Hybrid Quantum Search API", lifespan=lifespan)
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 # Read from env var for production flexibility; fall back to dev defaults
