@@ -1,0 +1,78 @@
+name: Deploy Backend → Hugging Face Spaces
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch: # allow manual trigger from GitHub Actions tab
+
+jobs:
+  deploy:
+    name: Push to HF Spaces
+    runs-on: ubuntu-latest
+    # Only run when the HF_TOKEN secret exists (skip on forks)
+    if: ${{ secrets.HF_TOKEN != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      # ── Required GitHub Secrets / Variables ────────────────────────────────
+      # Secrets (repo Settings → Secrets → Actions):
+      #   HF_TOKEN  — Write-access token from huggingface.co/settings/tokens
+      #
+      # Variables (repo Settings → Variables → Actions) — optional overrides:
+      #   HF_USERNAME  — defaults to ManojKumarMithireddy
+      #   HF_SPACE_NAME — defaults to bioquantum-api
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Deploy to Hugging Face Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ vars.HF_USERNAME || 'ManojKumarMithireddy' }}
+          HF_SPACE_NAME: ${{ vars.HF_SPACE_NAME || 'bioquantum-api' }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python - <<'EOF'
+          import os
+          from huggingface_hub import HfApi
+
+          token     = os.environ["HF_TOKEN"]
+          username  = os.environ.get("HF_USERNAME",  "ManojKumarMithireddy")
+          space     = os.environ.get("HF_SPACE_NAME", "bioquantum-api")
+          repo_id   = f"{username}/{space}"
+          sha       = os.environ.get("GITHUB_SHA", "unknown")[:8]
+
+          api = HfApi(token=token)
+
+          # Create the Space if it doesn't exist yet (idempotent)
+          api.create_repo(
+              repo_id=repo_id,
+              repo_type="space",
+              space_sdk="docker",
+              private=False,
+              exist_ok=True,
+          )
+          print(f"Space ready → https://huggingface.co/spaces/{repo_id}")
+
+          # Upload backend/ contents (the Dockerfile lives here)
+          api.upload_folder(
+              folder_path="backend",
+              repo_id=repo_id,
+              repo_type="space",
+              commit_message=f"Deploy from GitHub {sha}",
+              ignore_patterns=[
+                  "venv/**", "__pycache__/**", "*.pyc", "*.pyo",
+                  ".env", ".env.*",
+                  "tests/**", ".pytest_cache/**",
+              ],
+          )
+          print(f"✅ Deployed → https://huggingface.co/spaces/{repo_id}")
+          EOF

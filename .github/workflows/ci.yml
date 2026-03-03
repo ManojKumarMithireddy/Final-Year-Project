@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Backend: pytest ────────────────────────────────────────────────────────
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        working-directory: backend
+
+      # auth.py raises RuntimeError at import if JWT_SECRET is missing;
+      # crypto.py needs a valid Fernet key — generate one on the fly for CI.
+      - name: Set CI environment variables
+        run: |
+          echo "JWT_SECRET=ci-testing-only-not-for-production" >> $GITHUB_ENV
+          echo "MONGODB_URI=mongodb://localhost:27017"          >> $GITHUB_ENV
+          echo "FERNET_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> $GITHUB_ENV
+
+      - name: Run pytest
+        run: python -m pytest tests/ -v
+        working-directory: backend
+
+  # ── Frontend: vite build ───────────────────────────────────────────────────
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+        env:
+          # Placeholder values — the real values are set in Vercel / HF dashboard
+          VITE_API_BASE: https://placeholder.hf.space/api
+          VITE_GOOGLE_CLIENT_ID: placeholder-for-ci-build-check

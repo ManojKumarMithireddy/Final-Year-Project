@@ -1,0 +1,53 @@
+name: Deploy Frontend → Vercel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build & Deploy to Vercel
+    runs-on: ubuntu-latest
+    # Only run when VERCEL_TOKEN secret exists
+    if: ${{ secrets.VERCEL_TOKEN != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      # ── Required GitHub Secrets / Variables ────────────────────────────────
+      # Secrets (repo Settings → Secrets → Actions):
+      #   VERCEL_TOKEN  — from vercel.com/account/tokens
+      #
+      # Variables (repo Settings → Variables → Actions):
+      #   VITE_API_BASE         — e.g. https://ManojKumarMithireddy-bioquantum-api.hf.space/api
+      #   VITE_GOOGLE_CLIENT_ID — from Google Cloud Console OAuth credentials
+      # ──────────────────────────────────────────────────────────────────────
+
+      # Build locally so we control env vars, then deploy the dist/ directory.
+      # Copying vercel.json into dist/ ensures Vercel applies the SPA rewrite rules.
+      - name: Build with production env vars
+        run: |
+          npm run build
+          cp vercel.json dist/vercel.json
+        working-directory: frontend
+        env:
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+
+      - name: Deploy dist to Vercel
+        run: npx vercel deploy dist --prod --yes --name=bioquantum-frontend --token=${{ secrets.VERCEL_TOKEN }}
+        working-directory: frontend
