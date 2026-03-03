@@ -52,5 +52,5 @@ jobs:
         run: npx vercel deploy dist --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
         working-directory: frontend
         env:
-          VERCEL_ORG_ID: manojs-projects-750675e0
+          VERCEL_ORG_ID: team_LSLXCbLchlNReXl8sF7DU16M
           VERCEL_PROJECT_ID: prj_hblbmP0P4KLr9a4zAlgThdVdk38l
