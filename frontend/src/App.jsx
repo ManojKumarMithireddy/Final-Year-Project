@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, LayoutDashboard, History as HistoryIcon, Dna } from 'lucide-react';
+import { LogOut, LayoutDashboard, History as HistoryIcon, Dna, Menu, X } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
 import axios from 'axios';
 import Login from './pages/Login';
@@ -10,6 +10,8 @@ import VerifyEmail from './pages/VerifyEmail';
 import ResetPassword from './pages/ResetPassword';
 import SessionTimeoutModal from './components/SessionTimeoutModal';
 import ErrorBoundary from './components/ErrorBoundary';
+import BackendSleepBanner from './components/BackendSleepBanner';
+import { useBackendStatus } from './lib/useBackendStatus';
 
 // ── Session configuration ─────────────────────────────────────────────────────
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;  // 30 minutes
@@ -120,6 +122,8 @@ function Navigation() {
   const navigate = useNavigate();
   const location = useLocation();
   const userName = localStorage.getItem('userName') || 'User';
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const { status: backendStatus, retry: retryBackend } = useBackendStatus();
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
@@ -130,32 +134,38 @@ function Navigation() {
 
   const { showWarning, secondsLeft, extendSession } = useSessionTimeout(handleLogout);
 
-  if (location.pathname === '/login' || location.pathname === '/verify-email' || location.pathname === '/reset-password') return null;
+  const isAuthPage = ['/login', '/verify-email', '/reset-password'].includes(location.pathname);
+  if (isAuthPage) return null;
+
+  const navLinks = [
+    { path: '/',        label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" />, activeColor: 'text-blue-400' },
+    { path: '/history', label: 'History',   icon: <HistoryIcon className="w-4 h-4" />,     activeColor: 'text-purple-400' },
+  ];
 
   return (
     <>
       <nav className="bg-slate-950/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-16 flex justify-between items-center">
+          {/* Logo */}
           <div className="flex items-center gap-3">
             <Dna className="w-7 h-7 text-blue-500" />
             <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
               BioQuantum
             </span>
           </div>
-          <div className="flex items-center gap-6">
-            <button
-              onClick={() => navigate('/')}
-              className={`flex items-center gap-2 text-sm font-medium transition-colors ${location.pathname === '/' ? 'text-blue-400' : 'text-slate-400 hover:text-white'}`}
-            >
-              <LayoutDashboard className="w-4 h-4" /> Dashboard
-            </button>
-            <button
-              onClick={() => navigate('/history')}
-              className={`flex items-center gap-2 text-sm font-medium transition-colors ${location.pathname === '/history' ? 'text-purple-400' : 'text-slate-400 hover:text-white'}`}
-            >
-              <HistoryIcon className="w-4 h-4" /> History
-            </button>
-            <div className="h-6 w-px bg-slate-800"></div>
+
+          {/* Desktop links */}
+          <div className="hidden md:flex items-center gap-6">
+            {navLinks.map(({ path, label, icon, activeColor }) => (
+              <button
+                key={path}
+                onClick={() => navigate(path)}
+                className={`flex items-center gap-2 text-sm font-medium transition-colors ${location.pathname === path ? activeColor : 'text-slate-400 hover:text-white'}`}
+              >
+                {icon} {label}
+              </button>
+            ))}
+            <div className="h-6 w-px bg-slate-800" />
             <div className="flex items-center gap-4 text-sm">
               <span className="text-slate-300 font-medium">{userName}</span>
               <button
@@ -167,10 +177,44 @@ function Navigation() {
               </button>
             </div>
           </div>
+
+          {/* Mobile hamburger */}
+          <button
+            className="md:hidden text-slate-400 hover:text-white p-2 rounded-lg border border-slate-800 transition-colors"
+            onClick={() => setMobileOpen((v) => !v)}
+            aria-label="Toggle menu"
+          >
+            {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
         </div>
+
+        {/* Mobile dropdown */}
+        {mobileOpen && (
+          <div className="md:hidden border-t border-slate-800 bg-slate-950/95 backdrop-blur-md px-6 py-4 space-y-3">
+            {navLinks.map(({ path, label, icon, activeColor }) => (
+              <button
+                key={path}
+                onClick={() => { navigate(path); setMobileOpen(false); }}
+                className={`flex items-center gap-3 w-full text-sm font-medium py-2 transition-colors ${location.pathname === path ? activeColor : 'text-slate-400 hover:text-white'}`}
+              >
+                {icon} {label}
+              </button>
+            ))}
+            <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+              <span className="text-slate-300 text-sm font-medium">{userName}</span>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 transition-colors"
+              >
+                <LogOut className="w-4 h-4" /> Logout
+              </button>
+            </div>
+          </div>
+        )}
       </nav>
 
-      {/* Session timeout warning modal */}
+      <BackendSleepBanner status={backendStatus} onRetry={retryBackend} />
+
       <SessionTimeoutModal
         visible={showWarning}
         secondsLeft={secondsLeft}

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
 import axios from 'axios';
-import { Dna, Lock, Mail, ArrowRight, MailCheck, RefreshCw, KeyRound, Loader2 } from 'lucide-react';
+import { Dna, Lock, Mail, ArrowRight, MailCheck, RefreshCw, KeyRound, Loader2, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api';
@@ -41,6 +41,7 @@ export default function Login() {
   const [touched, setTouched] = useState({ email: false, password: false, name: false });
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // "Check your inbox" state — shown after successful registration
   const [pendingEmail, setPendingEmail] = useState('');
@@ -439,15 +440,24 @@ export default function Login() {
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600" />
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={formData.password}
                   onChange={(e) => handleChange('password', e.target.value)}
                   onBlur={() => handleBlur('password')}
-                  className={`w-full bg-slate-950/50 border rounded-xl pl-10 pr-4 py-3 text-white placeholder-slate-600 outline-none transition-colors
+                  className={`w-full bg-slate-950/50 border rounded-xl pl-10 pr-10 py-3 text-white placeholder-slate-600 outline-none transition-colors
                     ${fieldErrors.password ? 'border-red-500 focus:border-red-400' : 'border-slate-800 focus:border-purple-500'}`}
                   placeholder="Enter your password"
                   autoComplete={isLogin ? 'current-password' : 'new-password'}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                  tabIndex={-1}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
               <AnimatePresence><FieldError msg={fieldErrors.password} /></AnimatePresence>
 
