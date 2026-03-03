@@ -49,5 +49,8 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
 
       - name: Deploy dist to Vercel
-        run: npx vercel deploy dist --prod --yes --name=bioquantum-frontend --token=${{ secrets.VERCEL_TOKEN }}
+        run: npx vercel deploy dist --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
         working-directory: frontend
+        env:
+          VERCEL_ORG_ID: manojs-projects-750675e0
+          VERCEL_PROJECT_ID: prj_hblbmP0P4KLr9a4zAlgThdVdk38l

@@ -97,3 +97,6 @@ coverage.xml
 
 review.md
 deployment-review.md
+
+# Vercel CLI project link
+.vercel/
