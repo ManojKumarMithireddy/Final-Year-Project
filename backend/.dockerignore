@@ -1,0 +1,20 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets — never bake into the image
+.env
+.env.*
+
+# Dev/test only
+tests/
+
+# Editor
+.vscode/
+.idea/
