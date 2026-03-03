@@ -12,8 +12,6 @@ jobs:
   deploy:
     name: Push to HF Spaces
     runs-on: ubuntu-latest
-    # Only run when the HF_TOKEN secret exists (skip on forks)
-    if: ${{ secrets.HF_TOKEN != '' }}
 
     steps:
       - uses: actions/checkout@v4

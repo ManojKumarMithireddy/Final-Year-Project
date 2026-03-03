@@ -12,8 +12,6 @@ jobs:
   deploy:
     name: Build & Deploy to Vercel
     runs-on: ubuntu-latest
-    # Only run when VERCEL_TOKEN secret exists
-    if: ${{ secrets.VERCEL_TOKEN != '' }}
 
     steps:
       - uses: actions/checkout@v4
