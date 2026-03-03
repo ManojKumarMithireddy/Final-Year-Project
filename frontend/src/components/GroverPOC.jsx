@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Activity, Save } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Activity, Save, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import GroverStepNavigator from './GroverStepNavigator';
+import AmplitudeChart from './AmplitudeChart';
 
 // ── Crypto helpers ────────────────────────────────────────────────────────────
 
@@ -36,6 +37,16 @@ const xorBits = (a, b) =>
     .map((bit, i) => (bit === b[i] ? '0' : '1'))
     .join('');
 
+/** Convert raw shot counts → probabilities (0–1) for AmplitudeChart */
+const countsToProbabilities = (counts) => {
+  if (!counts) return null;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (total === 0) return null;
+  return Object.fromEntries(
+    Object.entries(counts).map(([k, v]) => [k, v / total]),
+  );
+};
+
 export default function GroverPOC() {
   const [pocDataset, setPocDataset] = useState(generateRandomDNA(32));
   const [numQubits, setNumQubits] = useState(4);
@@ -57,7 +68,20 @@ export default function GroverPOC() {
   const [pocEncryptionState, setPocEncryptionState] = useState(null);
   const [ibmJobId, setIbmJobId] = useState('');
   const [ibmJobStatus, setIbmJobStatus] = useState('');
+  const [ibmBackend, setIbmBackend] = useState('');
+  const ibmPollRef = useRef(null);
   const [activeStep, setActiveStep] = useState(0); // index into step_circuits
+
+  // Stop IBM auto-poll
+  const stopIbmPoll = useCallback(() => {
+    if (ibmPollRef.current) {
+      clearInterval(ibmPollRef.current);
+      ibmPollRef.current = null;
+    }
+  }, []);
+
+  // Cleanup poll on unmount
+  useEffect(() => () => stopIbmPoll(), [stopIbmPoll]);
 
   // Derived: chunks for display
   const pocBits = dnaToBits(pocDataset);
@@ -138,14 +162,22 @@ export default function GroverPOC() {
         const res = await api.post('/search/quantum-poc/ibm-submit', {
           target_bits: encryptedPayload,
         });
-        setIbmJobId(res.data.job_id);
+        const jobId = res.data.job_id;
+        setIbmJobId(jobId);
         setIbmJobStatus(res.data.status);
+        setIbmBackend(res.data.backend || '');
         setToyResult({
           circuit_diagram: res.data.circuit_diagram,
           iterations: res.data.iterations,
-          execution_time_ms: res.data.execution_time_ms,
-          measured_state: 'PENDING...',
+          execution_time_ms: 0,
+          measured_state: null,   // null = awaiting result
+          counts: null,
         });
+        // Auto-poll every 8 s until DONE / ERROR
+        stopIbmPoll();
+        ibmPollRef.current = setInterval(() => {
+          handleRefreshIbmJob(jobId);
+        }, 8000);
       }
     } catch (err) {
       const msg =
@@ -155,24 +187,31 @@ export default function GroverPOC() {
     setIsToyRunning(false);
   };
 
-  const handleRefreshIbmJob = async () => {
-    if (!ibmJobId) return;
+  const handleRefreshIbmJob = useCallback(async (jobIdOverride) => {
+    const jid = jobIdOverride || ibmJobId;
+    if (!jid) return;
     try {
       const res = await api.post('/search/quantum-poc/ibm-status', {
-        job_id: ibmJobId,
+        job_id: jid,
       });
       setIbmJobStatus(res.data.status);
       if (res.data.status === 'DONE') {
+        stopIbmPoll();
         setToyResult((prev) => ({
           ...prev,
           measured_state: res.data.measured_state,
-          execution_time_ms: res.data.execution_time_ms,
+          counts: res.data.counts,
+          execution_time_ms: res.data.execution_time_ms ?? 0,
         }));
+        toast.success('IBM QPU job complete!');
+      } else if (res.data.status === 'ERROR' || res.data.status === 'CANCELLED') {
+        stopIbmPoll();
+        toast.error(`IBM job ${res.data.status.toLowerCase()}.`);
       }
     } catch (err) {
       toast.error('Error checking IBM job status.');
     }
-  };
+  }, [ibmJobId, stopIbmPoll]);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -437,29 +476,53 @@ export default function GroverPOC() {
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-slate-950/80 border border-slate-800 p-5 rounded-2xl flex items-center justify-between">
-                <div>
-                  <div className="text-sm text-slate-400">
-                    Job ID:{' '}
-                    <span className="font-mono text-slate-300 ml-2">
-                      {ibmJobId}
-                    </span>
+                className="bg-slate-950/80 border border-blue-900/50 p-5 rounded-2xl">
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div className="space-y-1.5">
+                    {ibmBackend && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Cpu className="w-4 h-4 text-blue-400 shrink-0" />
+                        <span className="text-slate-400">Backend:</span>
+                        <span className="font-mono text-blue-300">{ibmBackend}</span>
+                      </div>
+                    )}
+                    <div className="text-sm text-slate-400">
+                      Job ID:{' '}
+                      <span className="font-mono text-slate-300 ml-1 text-xs break-all">
+                        {ibmJobId}
+                      </span>
+                    </div>
+                    <div className="text-sm flex items-center gap-2">
+                      <span className="text-slate-400">Status:</span>
+                      <span
+                        className={`font-semibold ${
+                          ibmJobStatus === 'DONE'
+                            ? 'text-emerald-400'
+                            : ibmJobStatus === 'ERROR' || ibmJobStatus === 'CANCELLED'
+                            ? 'text-red-400'
+                            : 'text-amber-400'
+                        }`}>
+                        {ibmJobStatus}
+                      </span>
+                      {ibmJobStatus !== 'DONE' && ibmJobStatus !== 'ERROR' && ibmJobStatus !== 'CANCELLED' && (
+                        <span className="flex gap-1">
+                          {[0,1,2].map(i => (
+                            <motion.span key={i} className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"
+                              animate={{ opacity: [0.3,1,0.3] }}
+                              transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }} />
+                          ))}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-sm mt-1">
-                    Status:{' '}
-                    <span
-                      className={`font-semibold ml-2 ${ibmJobStatus === 'DONE' ? 'text-emerald-400' : 'text-amber-400 animate-pulse'}`}>
-                      {ibmJobStatus}
-                    </span>
-                  </div>
+                  {ibmJobStatus !== 'DONE' && ibmJobStatus !== 'ERROR' && ibmJobStatus !== 'CANCELLED' && (
+                    <button
+                      onClick={() => handleRefreshIbmJob()}
+                      className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm transition-colors border border-slate-700 shrink-0">
+                      Refresh now
+                    </button>
+                  )}
                 </div>
-                {ibmJobStatus !== 'DONE' && (
-                  <button
-                    onClick={handleRefreshIbmJob}
-                    className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm transition-colors border border-slate-700">
-                    Refresh
-                  </button>
-                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -531,14 +594,23 @@ export default function GroverPOC() {
                             noise={(toyResult.noise_level * 100).toFixed(1)}%
                           </span>
                         )}
+                        {ibmBackend && (
+                          <span className="ml-auto flex items-center gap-1 text-xs text-blue-400/80 font-normal">
+                            <Cpu className="w-3 h-3" /> {ibmBackend}
+                          </span>
+                        )}
                       </h3>
+
+                      {/* Metrics row */}
                       <div className="grid grid-cols-3 gap-4 text-center text-sm mb-6 bg-slate-950 p-5 rounded-xl border border-slate-800">
                         <div>
                           <span className="block text-slate-500 text-xs uppercase tracking-wider mb-1">
-                            State Config
+                            {toyResult.measured_state ? 'Top State' : 'Status'}
                           </span>
                           <span className="text-white font-mono tracking-widest text-lg">
-                            {toyResult.measured_state}
+                            {toyResult.measured_state
+                              ? `|${toyResult.measured_state}⟩`
+                              : <span className="text-amber-400 text-sm animate-pulse">Queued…</span>}
                           </span>
                         </div>
                         <div className="border-x border-slate-800">
@@ -554,11 +626,63 @@ export default function GroverPOC() {
                             Time (ms)
                           </span>
                           <span className="text-white font-mono text-lg">
-                            {toyResult.execution_time_ms.toFixed(1)}
+                            {backendType === 'ibm_cloud' && !toyResult.execution_time_ms
+                              ? <span className="text-slate-500 text-sm">QPU</span>
+                              : toyResult.execution_time_ms?.toFixed(1)}
                           </span>
                         </div>
                       </div>
-                      {/* ── Step-by-step circuit navigator ── */}
+
+                      {/* IBM counts chart — shown when job completes */}
+                      {backendType === 'ibm_cloud' && toyResult.counts && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="mb-6 bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+                          <div className="text-xs text-blue-400 font-medium uppercase tracking-widest mb-3 flex items-center gap-2">
+                            <Cpu className="w-3.5 h-3.5" /> Real QPU Measurement Distribution
+                            <span className="ml-auto text-slate-500 font-normal normal-case">
+                              {Object.values(toyResult.counts).reduce((a, b) => a + b, 0).toLocaleString()} shots
+                            </span>
+                          </div>
+                          <AmplitudeChart
+                            probabilities={countsToProbabilities(toyResult.counts)}
+                            targetBits={pocEncryptionState?.encrypted}
+                            stepIndex={3}
+                          />
+                          {/* Raw counts table */}
+                          <div className="mt-4 max-h-32 overflow-y-auto">
+                            <table className="w-full text-xs text-left">
+                              <thead className="sticky top-0 bg-slate-900 border-b border-slate-800">
+                                <tr>
+                                  <th className="px-3 py-1.5 text-slate-500 font-medium">State</th>
+                                  <th className="px-3 py-1.5 text-slate-500 font-medium">Shots</th>
+                                  <th className="px-3 py-1.5 text-slate-500 font-medium">Probability</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {Object.entries(toyResult.counts)
+                                  .sort(([, a], [, b]) => b - a)
+                                  .map(([state, shots]) => {
+                                    const total = Object.values(toyResult.counts).reduce((a, b) => a + b, 0);
+                                    const isTop = state === toyResult.measured_state;
+                                    return (
+                                      <tr key={state} className={`border-b border-slate-800/40 ${isTop ? 'bg-amber-900/20' : ''}`}>
+                                        <td className={`px-3 py-1.5 font-mono tracking-widest ${isTop ? 'text-amber-400 font-bold' : 'text-slate-300'}`}>
+                                          |{state}⟩ {isTop && '🎯'}
+                                        </td>
+                                        <td className="px-3 py-1.5 font-mono text-slate-400">{shots.toLocaleString()}</td>
+                                        <td className="px-3 py-1.5 font-mono text-slate-400">{(shots / total * 100).toFixed(1)}%</td>
+                                      </tr>
+                                    );
+                                  })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {/* Step-by-step circuit navigator (simulator) or full circuit (IBM) */}
                       {toyResult.step_circuits &&
                       toyResult.step_circuits.length > 0 ? (
                         <GroverStepNavigator
@@ -570,7 +694,6 @@ export default function GroverPOC() {
                           }
                         />
                       ) : (
-                        /* Fallback: full circuit (IBM path) */
                         toyResult.circuit_diagram && (
                           <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950">
                             <div className="p-3 text-slate-500 text-xs flex items-center gap-2 border-b border-slate-800 bg-slate-900/50 uppercase tracking-widest font-medium">
@@ -589,7 +712,7 @@ export default function GroverPOC() {
                 )}
 
                 {/* Step 3: Client Decrypt */}
-                {toyResult && (
+                {toyResult && toyResult.measured_state && /^[01]+$/.test(toyResult.measured_state) && (
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
