@@ -2,9 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Dna, CheckCircle, XCircle, Loader } from 'lucide-react';
-import axios from 'axios';
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api';
+import api from '../lib/api';
 
 export default function VerifyEmail() {
   const [searchParams] = useSearchParams();
@@ -23,8 +21,8 @@ export default function VerifyEmail() {
       return;
     }
 
-    axios
-      .get(`${API_BASE}/auth/verify-email`, { params: { token } })
+    api
+      .get('/auth/verify-email', { params: { token } })
       .then((res) => {
         localStorage.setItem('token', res.data.access_token);
         localStorage.setItem('userName', res.data.user.name || res.data.user.email);
@@ -50,7 +48,7 @@ export default function VerifyEmail() {
     if (!resendEmail) return;
     setResendLoading(true);
     try {
-      await axios.post(`${API_BASE}/auth/resend-verification`, { email: resendEmail });
+      await api.post('/auth/resend-verification', { email: resendEmail });
       setResendSent(true);
     } catch (err) {
       setMessage(err.response?.data?.detail || 'Could not resend. Please try again.');

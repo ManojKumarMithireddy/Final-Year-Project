@@ -160,22 +160,45 @@ export default function GroverPOC() {
   const [healthyStep, setHealthyStep]     = useState(0);
 
   // Live marker info (refreshable)
-  const [markerInfo, setMarkerInfo]       = useState(null);
-  const [markerLoading, setMarkerLoading] = useState(false);
+  const [markerInfo, setMarkerInfo]           = useState(null);
+  const [markerLoading, setMarkerLoading]     = useState(false);
+  const [markerFetchedAt, setMarkerFetchedAt] = useState(null);
+  const [markerFlash, setMarkerFlash]         = useState(false);
+  const [markerOffset, setMarkerOffset]       = useState(0);  // index into nearbyWindows (0 = centre)
+  const [nearbyWindows, setNearbyWindows]     = useState([]);  // pre-fetched from backend
 
   const fetchMarker = useCallback(async (codons, showToast = false) => {
     setMarkerLoading(true);
     try {
       const r = await api.get(`/search/quantum-poc/bio-marker?n_codons=${codons}&force=${showToast}`);
       setMarkerInfo(r.data);
-      if (showToast) toast.success('Disease marker refreshed from NCBI.');
+      // store the pre-computed windows array if the backend returned it
+      if (r.data.nearby_windows?.length) setNearbyWindows(r.data.nearby_windows);
+      setMarkerFetchedAt(new Date());
+      setMarkerFlash(true);
+      setTimeout(() => setMarkerFlash(false), 800);
+      if (showToast) toast.success('Marker re-fetched from NCBI.');
     } catch (err) {
-      if (showToast) toast.error(err.response?.data?.detail ?? 'Failed to fetch marker from NCBI.');
+      if (showToast) toast.error(err.response?.data?.detail ?? 'Failed to reach NCBI. Try again shortly.');
     }
     setMarkerLoading(false);
   }, []);
 
-  useEffect(() => { fetchMarker(nCodons); }, [nCodons, fetchMarker]);
+  // Reset offset and fetch when codon count changes
+  useEffect(() => {
+    setMarkerOffset(0);
+    setNearbyWindows([]);
+    fetchMarker(nCodons, false);
+  }, [nCodons, fetchMarker]);
+
+  // Derived: what the marker display should show right now
+  // nearbyWindows is sorted offset -5..+5; index 5 = centre (offset 0)
+  const CENTRE_IDX = 5;
+  const displayWindow = nearbyWindows.length
+    ? nearbyWindows[Math.min(Math.max(CENTRE_IDX + markerOffset, 0), nearbyWindows.length - 1)]
+    : null;
+  const displayDna  = displayWindow?.dna  ?? markerInfo?.marker_dna  ?? null;
+  const displayBits = displayWindow?.bits ?? markerInfo?.marker_bits ?? null;
 
   // IBM state (unchanged)
   const [ibmResult, setIbmResult]       = useState(null);
@@ -265,6 +288,7 @@ export default function GroverPOC() {
         ibmPollRef.current = setInterval(() => pollIbmStatus(res.data.job_id, res.data.marker_bits), 8000);
       }
     } catch (err) {
+      stopPoll();
       toast.error(err.response?.data?.detail ?? 'Quantum execution failed.');
     }
     setIsRunning(false);
@@ -313,13 +337,24 @@ export default function GroverPOC() {
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-medium text-slate-400 uppercase tracking-widest">NCBI Data Sources</div>
                   <button
-                    onClick={() => fetchMarker(nCodons, true)}
+                    onClick={() => {
+                      if (nearbyWindows.length) {
+                        // cycle locally through the pre-fetched windows — instant, no API call
+                        const next = markerOffset + 1;
+                        const maxOffset = nearbyWindows.length - 1 - 5; // 5 = CENTRE_IDX
+                        setMarkerOffset(next > maxOffset ? -5 : next);
+                        setMarkerFlash(true);
+                        setTimeout(() => setMarkerFlash(false), 800);
+                      } else {
+                        fetchMarker(nCodons, true);
+                      }
+                    }}
                     disabled={markerLoading}
-                    title="Re-fetch marker from NCBI"
+                    title="Cycle to next node window around c.5266dupC hotspot"
                     className="flex items-center gap-1 text-xs text-slate-500 hover:text-amber-400 transition-colors disabled:opacity-40"
                   >
                     <RotateCcw className={`w-3 h-3 ${markerLoading ? 'animate-spin' : ''}`} />
-                    {markerLoading ? 'Fetching…' : 'Refresh marker'}
+                    {markerLoading ? 'Fetching…' : `Refresh marker${markerOffset !== 0 ? ` (${markerOffset > 0 ? '+' : ''}${markerOffset})` : ''}`}
                   </button>
                 </div>
                 <div className="flex items-start gap-2">
@@ -338,15 +373,27 @@ export default function GroverPOC() {
                       <span className="font-mono text-red-300">{markerInfo?.marker_variant ?? 'c.5266dupC'}</span>
                       <span className="text-slate-500 ml-1 text-xs">pathogenic — exon 20</span>
                     </div>
-                    {markerInfo && (
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-red-400 tracking-widest text-xs bg-red-950/40 px-2 py-0.5 rounded">
-                          {markerInfo.marker_dna}
-                        </span>
-                        <span className="font-mono text-slate-500 text-xs">{markerInfo.marker_bits}</span>
-                        <span className="text-slate-500 text-xs">{markerInfo.n_qubits} qubits</span>
-                      </div>
-                    )}
+                    <div className={`flex items-center gap-2 flex-wrap transition-all duration-300 ${markerFlash ? 'ring-1 ring-amber-400/60 bg-amber-400/10 rounded px-1' : ''}`}>
+                      {markerLoading && !markerInfo ? (
+                        <span className="text-xs text-slate-500 italic animate-pulse">fetching marker…</span>
+                      ) : (
+                        <>
+                          <span className="font-mono text-red-400 tracking-widest text-xs bg-red-950/40 px-2 py-0.5 rounded">
+                            {displayDna ?? '—'}
+                          </span>
+                          <span className="font-mono text-slate-500 text-xs">{displayBits ?? '—'}</span>
+                          <span className="text-slate-500 text-xs">{markerInfo?.n_qubits ?? nCodons * 6} qubits</span>
+                          {markerOffset !== 0 && (
+                            <span className="text-xs text-amber-400/60 font-mono">
+                              node{markerOffset > 0 ? `+${markerOffset}` : markerOffset}
+                            </span>
+                          )}
+                          {markerLoading && (
+                            <span className="text-xs text-amber-400/70 italic animate-pulse">updating…</span>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
                 {backendType === 'simulator' && (

@@ -198,17 +198,24 @@ async def ibm_submit_job(request: IBMSubmitRequest, current_user: dict = Depends
 
 
 @router.get("/quantum-poc/bio-marker")
-async def get_bio_marker(n_codons: int = 2, force: bool = False):
+async def get_bio_marker(n_codons: int = 2, force: bool = False, offset: int = 0):
     """
     Lightweight endpoint — returns the current disease marker info without running a simulation.
     force=true clears the NCBI sequence cache and re-fetches from NCBI.
+    Also returns nearby_windows (offsets -5..+5) so the frontend can cycle locally.
     """
     reference_seq = fetch_patient_dna(force=force)
     if not reference_seq:
         raise HTTPException(status_code=502, detail="Failed to fetch BRCA1 reference from NCBI. The NCBI service may be temporarily unavailable.")
     mutant_seq  = apply_brca1_mutation(reference_seq)
-    marker_seq  = get_marker_seq(mutant_seq, n_codons)
+    marker_seq  = get_marker_seq(mutant_seq, n_codons, offset=offset)
     target_bits = encode_dna(marker_seq)
+    # Pre-compute windows -5..+5 so the frontend can cycle without extra API calls
+    nearby_windows = [
+        {"offset": o, "dna": get_marker_seq(mutant_seq, n_codons, offset=o),
+         "bits": encode_dna(get_marker_seq(mutant_seq, n_codons, offset=o))}
+        for o in range(-5, 6)
+    ]
     return {
         "marker_dna":        marker_seq,
         "marker_bits":       target_bits,
@@ -218,6 +225,8 @@ async def get_bio_marker(n_codons: int = 2, force: bool = False):
         "patient_accession": PATIENT_ACCESSION,
         "n_codons":          n_codons,
         "n_qubits":          n_codons * 6,
+        "offset":            offset,
+        "nearby_windows":    nearby_windows,
     }
 
 

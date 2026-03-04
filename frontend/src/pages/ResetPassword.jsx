@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import axios from 'axios';
+import api from '../lib/api';
 import { Dna, Lock, CheckCircle, XCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api';
 
 const PASSWORD_RULES = [
   { label: 'At least 8 characters',             test: (p) => p.length >= 8 },
@@ -36,7 +34,7 @@ export default function ResetPassword() {
     setLoading(true);
     setServerError('');
     try {
-      await axios.post(`${API_BASE}/auth/reset-password`, {
+      await api.post('/auth/reset-password', {
         token,
         new_password: password,
       });

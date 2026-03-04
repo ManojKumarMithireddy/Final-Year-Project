@@ -128,13 +128,18 @@ def apply_brca1_mutation(seq: str) -> str:
     return seq[:INSERTION_POS] + "C" + seq[INSERTION_POS:]
 
 
-def get_marker_seq(mutant_seq: str, n_codons: int) -> str:
+def get_marker_seq(mutant_seq: str, n_codons: int, offset: int = 0) -> str:
     """
     Extract the disease marker codon(s) from a mutant sequence.
-    Finds the node boundary that contains INSERTION_POS for the given n_codons window size.
+    Finds the node boundary that contains INSERTION_POS for the given n_codons
+    window size, then shifts by `offset` nodes (positive = downstream, negative =
+    upstream) so callers can explore neighbouring windows around the hotspot.
     """
     wsize  = n_codons * 3
-    start  = (INSERTION_POS // wsize) * wsize
+    center = (INSERTION_POS // wsize) * wsize
+    start  = center + offset * wsize
+    # clamp to valid range
+    start  = max(0, min(start, len(mutant_seq) - wsize))
     return mutant_seq[start : start + wsize]
 
 

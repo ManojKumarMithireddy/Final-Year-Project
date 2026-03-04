@@ -5,6 +5,8 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import ComplexityChart from './ComplexityChart';
 
+const ACCESSION_RE = /^[A-Za-z0-9._-]{1,30}$/;
+
 export default function HybridSearchPanel() {
   const [accession, setAccession] = useState('NM_007294');
   const [targetKmer, setTargetKmer] = useState('ATGCT');
@@ -23,6 +25,10 @@ export default function HybridSearchPanel() {
   }, []);
 
   const handleFetchDataset = async () => {
+    if (!ACCESSION_RE.test(accession)) {
+      toast.error('Invalid accession format. Use only letters, numbers, dots, dashes, or underscores (max 30 chars).');
+      return;
+    }
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     setIsFetching(true);
@@ -30,7 +36,7 @@ export default function HybridSearchPanel() {
     setClassicalResult(null);
     setQuantumMetrics(null);
     try {
-      const res = await api.get(`/sequence/${accession}`);
+      const res = await api.get(`/sequence/${accession}`, { signal: abortRef.current.signal });
       setDatasetData(res.data);
     } catch (err) {
       const msg =
@@ -51,12 +57,12 @@ export default function HybridSearchPanel() {
       const cRes = await api.post('/search/classical', {
         dataset: datasetData.sequence,
         target: targetKmer,
-      });
+      }, { signal: abortRef.current.signal });
       setClassicalResult(cRes.data);
 
       const qRes = await api.post('/search/quantum-simulation', {
         n_windows: cRes.data.n_windows,
-      });
+      }, { signal: abortRef.current.signal });
       setQuantumMetrics(qRes.data);
     } catch (err) {
       toast.error('Error running search.');
