@@ -20,7 +20,7 @@ from models.schemas import QuantumToyRequest, IBMSubmitRequest, IBMStatusRequest
 from services.grover import build_grover_circuit, build_grover_step_circuits
 from services.bio_grover import (
     fetch_patient_dna, fetch_disease_marker,
-    build_patient_nodes, build_bio_grover_circuit, run_bio_grover_local,
+    build_patient_nodes, build_bio_grover_ibm, run_bio_grover_local,
     encode_dna, decode_bits,
     MARKER_GENE_NAME, MARKER_VARIANT, MARKER_REGION_DESC, PATIENT_ACCESSION,
 )
@@ -353,8 +353,8 @@ async def bio_grover_ibm_submit(
     target_bits       = encode_dna(marker_seq_clean)
 
     try:
-        qc, k, n_unique, n_unconstrained, target_found, _ = \
-            build_bio_grover_circuit(patient_nodes, target_bits)
+        qc, k, n_unique, n_unconstrained, target_found = \
+            build_bio_grover_ibm(patient_nodes, target_bits)
 
         service = QiskitRuntimeService(
             channel="ibm_cloud",
