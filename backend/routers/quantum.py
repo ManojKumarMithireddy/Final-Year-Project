@@ -19,7 +19,7 @@ from crypto import decrypt_value
 from models.schemas import QuantumToyRequest, IBMSubmitRequest, IBMStatusRequest, BioQuantumRequest, BioIBMSubmitRequest
 from services.grover import build_grover_circuit, build_grover_step_circuits
 from services.bio_grover import (
-    fetch_patient_dna, fetch_disease_marker,
+    fetch_patient_dna, apply_brca1_mutation, get_marker_seq,
     build_patient_nodes, build_bio_grover_ibm, run_bio_grover_local,
     encode_dna, decode_bits,
     MARKER_GENE_NAME, MARKER_VARIANT, MARKER_REGION_DESC, PATIENT_ACCESSION,
@@ -249,17 +249,15 @@ async def bio_grover_local(
     n_codons = request.n_codons
     n_qubits = n_codons * 6
 
-    # Fetch patient DNA from NCBI
-    patient_seq = fetch_patient_dna()
-    if not patient_seq:
+    # Fetch BRCA1 reference from NCBI, then apply c.5266dupC to simulate a carrier patient
+    reference_seq = fetch_patient_dna()
+    if not reference_seq:
         raise HTTPException(status_code=502, detail="Failed to fetch patient DNA from NCBI (NM_007294.4).")
 
-    # Fetch disease marker from NCBI
-    marker_seq = fetch_disease_marker(n_codons)
-    if not marker_seq or len(marker_seq) < n_codons * 3:
-        raise HTTPException(status_code=502, detail="Failed to fetch BRCA1 disease marker from NCBI.")
+    patient_seq = apply_brca1_mutation(reference_seq)  # simulated carrier
 
-    marker_seq_clean = marker_seq[: n_codons * 3]
+    # Disease marker = the mutant codon containing the dupC insertion
+    marker_seq_clean = get_marker_seq(patient_seq, n_codons)
 
     # Build patient node table — scale with qubit capacity
     # We use enough sequence to fill 2^n_qubits slots at most (preventing huge tables)
@@ -339,15 +337,12 @@ async def bio_grover_ibm_submit(
     n_codons = request.n_codons
     n_qubits = n_codons * 6
 
-    # Fetch sequences
-    patient_seq = fetch_patient_dna()
-    if not patient_seq:
+    # Fetch sequences — apply c.5266dupC mutation to simulate carrier patient
+    reference_seq = fetch_patient_dna()
+    if not reference_seq:
         raise HTTPException(status_code=502, detail="Failed to fetch patient DNA from NCBI.")
-    marker_seq = fetch_disease_marker(n_codons)
-    if not marker_seq or len(marker_seq) < n_codons * 3:
-        raise HTTPException(status_code=502, detail="Failed to fetch BRCA1 marker from NCBI.")
-
-    marker_seq_clean = marker_seq[: n_codons * 3]
+    patient_seq      = apply_brca1_mutation(reference_seq)
+    marker_seq_clean = get_marker_seq(patient_seq, n_codons)
     max_nodes         = min(1 << n_qubits, 512)   # smaller cap for QPU
     patient_nodes     = build_patient_nodes(patient_seq[: max_nodes * n_codons * 3], n_codons)
     target_bits       = encode_dna(marker_seq_clean)

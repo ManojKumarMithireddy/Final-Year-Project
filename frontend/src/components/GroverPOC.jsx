@@ -215,7 +215,7 @@ export default function GroverPOC() {
                   <div>
                     <span className="text-slate-300 font-medium">Patient: </span>
                     <span className="font-mono text-blue-300">NM_007294.4</span>
-                    <span className="text-slate-500 ml-1 text-xs">(BRCA1 mRNA reference)</span>
+                    <span className="text-slate-500 ml-1 text-xs">(BRCA1 mRNA + c.5266dupC simulated carrier)</span>
                   </div>
                 </div>
                 <div className="flex items-start gap-2">

@@ -57,8 +57,9 @@ MARKER_ACCESSION   = "NM_007294.4"
 MARKER_GENE_NAME   = "BRCA1"
 MARKER_VARIANT     = "c.5266dupC"
 MARKER_REGION_DESC = "BRCA1 exon 20 — c.5266dupC pathogenic hotspot"
-# 0-based nt start; 5262 % 3 == 0 and 5262 % 6 == 0 (node-boundary-aligned)
-MARKER_NT_START = 5262
+# 0-based insertion point of the duplicated C in the mutant sequence
+# c.5266dupC inserts an extra C at 0-based index 5266 of NM_007294.4
+INSERTION_POS   = 5266
 
 # Module-level sequence cache (fetched from NCBI once per process lifetime)
 _seq_cache: Dict[str, str] = {}
@@ -114,14 +115,24 @@ def fetch_patient_dna() -> Optional[str]:
     return _ncbi_fetch(PATIENT_ACCESSION)
 
 
-def fetch_disease_marker(n_codons: int) -> Optional[str]:
+def apply_brca1_mutation(seq: str) -> str:
     """
-    Fetch the disease marker node from NCBI.
-    Returns n_codons * 3 nucleotides from the BRCA1 c.5266dupC hotspot region.
+    Simulate a c.5266dupC carrier by inserting an extra 'C' at INSERTION_POS.
+    Returns the mutant sequence representing a patient who carries the pathogenic variant.
     """
-    start_1b = MARKER_NT_START + 1          # NCBI is 1-based
-    stop_1b  = MARKER_NT_START + n_codons * 3
-    return _ncbi_fetch(MARKER_ACCESSION, seq_start=start_1b, seq_stop=stop_1b)
+    if len(seq) <= INSERTION_POS:
+        return seq
+    return seq[:INSERTION_POS] + "C" + seq[INSERTION_POS:]
+
+
+def get_marker_seq(mutant_seq: str, n_codons: int) -> str:
+    """
+    Extract the disease marker codon(s) from a mutant sequence.
+    Finds the node boundary that contains INSERTION_POS for the given n_codons window size.
+    """
+    wsize  = n_codons * 3
+    start  = (INSERTION_POS // wsize) * wsize
+    return mutant_seq[start : start + wsize]
 
 
 # ---------------------------------------------------------------------------
