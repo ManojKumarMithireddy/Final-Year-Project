@@ -197,6 +197,30 @@ async def ibm_submit_job(request: IBMSubmitRequest, current_user: dict = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/quantum-poc/bio-marker")
+async def get_bio_marker(n_codons: int = 2):
+    """
+    Lightweight endpoint — returns the current disease marker info without running a simulation.
+    Used by the frontend to show / refresh the live marker data.
+    """
+    reference_seq = fetch_patient_dna()
+    if not reference_seq:
+        raise HTTPException(status_code=502, detail="Failed to fetch BRCA1 reference from NCBI.")
+    mutant_seq  = apply_brca1_mutation(reference_seq)
+    marker_seq  = get_marker_seq(mutant_seq, n_codons)
+    target_bits = encode_dna(marker_seq)
+    return {
+        "marker_dna":        marker_seq,
+        "marker_bits":       target_bits,
+        "marker_variant":    MARKER_VARIANT,
+        "marker_region":     MARKER_REGION_DESC,
+        "marker_gene":       MARKER_GENE_NAME,
+        "patient_accession": PATIENT_ACCESSION,
+        "n_codons":          n_codons,
+        "n_qubits":          n_codons * 6,
+    }
+
+
 @router.post("/quantum-poc/ibm-status")
 async def ibm_job_status(request: IBMStatusRequest, current_user: dict = Depends(get_current_user)):
     """

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Cpu, Dna, Search, FlaskConical } from 'lucide-react';
+import { Save, Cpu, Dna, Search, FlaskConical, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
@@ -159,6 +159,21 @@ export default function GroverPOC() {
   const [carrierStep, setCarrierStep]     = useState(0);
   const [healthyStep, setHealthyStep]     = useState(0);
 
+  // Live marker info (refreshable)
+  const [markerInfo, setMarkerInfo]       = useState(null);
+  const [markerLoading, setMarkerLoading] = useState(false);
+
+  const fetchMarker = useCallback(async (codons) => {
+    setMarkerLoading(true);
+    try {
+      const r = await api.get(`/search/quantum-poc/bio-marker?n_codons=${codons}`);
+      setMarkerInfo(r.data);
+    } catch { /* silent — static fallback shown */ }
+    setMarkerLoading(false);
+  }, []);
+
+  useEffect(() => { fetchMarker(nCodons); }, [nCodons, fetchMarker]);
+
   // IBM state (unchanged)
   const [ibmResult, setIbmResult]       = useState(null);
   const [activeStep, setActiveStep]     = useState(0);
@@ -292,7 +307,18 @@ export default function GroverPOC() {
             {/* LEFT: NCBI sources + codon selector */}
             <div className="space-y-5">
               <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3 text-sm">
-                <div className="text-xs font-medium text-slate-400 uppercase tracking-widest">NCBI Data Sources</div>
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium text-slate-400 uppercase tracking-widest">NCBI Data Sources</div>
+                  <button
+                    onClick={() => fetchMarker(nCodons)}
+                    disabled={markerLoading}
+                    title="Re-fetch marker from NCBI"
+                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-amber-400 transition-colors disabled:opacity-40"
+                  >
+                    <RotateCcw className={`w-3 h-3 ${markerLoading ? 'animate-spin' : ''}`} />
+                    {markerLoading ? 'Fetching…' : 'Refresh marker'}
+                  </button>
+                </div>
                 <div className="flex items-start gap-2">
                   <span className="text-blue-400 shrink-0">🧬</span>
                   <div>
@@ -303,10 +329,21 @@ export default function GroverPOC() {
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="text-red-400 shrink-0">🎯</span>
-                  <div>
-                    <span className="text-slate-300 font-medium">Marker: </span>
-                    <span className="font-mono text-red-300">c.5266dupC</span>
-                    <span className="text-slate-500 ml-1 text-xs">pathogenic — exon 20</span>
+                  <div className="space-y-0.5">
+                    <div>
+                      <span className="text-slate-300 font-medium">Marker: </span>
+                      <span className="font-mono text-red-300">{markerInfo?.marker_variant ?? 'c.5266dupC'}</span>
+                      <span className="text-slate-500 ml-1 text-xs">pathogenic — exon 20</span>
+                    </div>
+                    {markerInfo && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-red-400 tracking-widest text-xs bg-red-950/40 px-2 py-0.5 rounded">
+                          {markerInfo.marker_dna}
+                        </span>
+                        <span className="font-mono text-slate-500 text-xs">{markerInfo.marker_bits}</span>
+                        <span className="text-slate-500 text-xs">{markerInfo.n_qubits} qubits</span>
+                      </div>
+                    )}
                   </div>
                 </div>
                 {backendType === 'simulator' && (
@@ -473,29 +510,6 @@ export default function GroverPOC() {
                   <div className="text-slate-500 text-xs ml-auto">{carrierResult.marker_variant} · {carrierResult.marker_region}</div>
                 </div>
 
-                {/* Side-by-side comparison badges */}
-                <div>
-                  <div className="text-xs text-slate-500 uppercase tracking-widest mb-3">
-                    Same marker searched in two patients — click a card to view step detail
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <MiniDetectionBadge
-                      result={carrierResult.detection_result}
-                      confidence={carrierResult.confidence}
-                      label="Patient A — Carrier (c.5266dupC present)"
-                      active={activePatient === 'carrier'}
-                      onClick={() => setActivePatient('carrier')}
-                    />
-                    <MiniDetectionBadge
-                      result={healthyResult.detection_result}
-                      confidence={healthyResult.confidence}
-                      label="Patient B — Healthy Control"
-                      active={activePatient === 'healthy'}
-                      onClick={() => setActivePatient('healthy')}
-                    />
-                  </div>
-                </div>
-
                 {/* Specificity warning — marker not unique enough */}
                 {carrierResult.marker_in_reference && (
                   <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-4 text-sm space-y-2">
@@ -528,40 +542,91 @@ export default function GroverPOC() {
                       <strong className="text-slate-300">Why 100% confidence?</strong>{' '}
                       Grover's algorithm uses exactly <em>k = ⌊π/4·√N⌋</em> iterations, where N is the
                       number of unique DNA nodes. This places the target amplitude at
-                      sin²((2k+1)·arcsin(1/√N)) ≈ 1 — so with {selectedResult?.n_qubits}-qubit
-                      search over ~{carrierResult.total_nodes} nodes, nearly all {1024} shots land on
+                      sin²((2k+1)·arcsin(1/√N)) ≈ 1 — so with {carrierResult.n_qubits}-qubit
+                      search over ~{carrierResult.total_nodes} nodes, nearly all 1024 shots land on
                       the target state. This is correct and expected behaviour, not an error.
                     </span>
                   </div>
                 )}
 
-                {/* Stats row for selected patient */}
-                <div className="grid grid-cols-3 gap-3 text-sm">
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
-                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Patient</div>
-                    <div className="font-mono text-blue-300 text-xs">{selectedResult.patient_accession}</div>
-                    <div className="text-slate-500 text-xs mt-0.5">{selectedResult.patient_label}</div>
-                  </div>
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
-                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Nodes</div>
-                    <div className="font-mono text-amber-400 font-bold">{selectedResult.total_nodes}</div>
-                    <div className="text-slate-500 text-xs">{selectedResult.n_qubits} qubits · {selectedResult.iterations} iter</div>
-                  </div>
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
-                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Marker in table</div>
-                    <div className={`font-bold text-sm ${selectedResult.target_found ? 'text-red-400' : 'text-emerald-400'}`}>
-                      {selectedResult.target_found ? '⚠ YES' : '✓ NO'}
+                {/* ── Per-patient cards with tables ──────────────────────────────── */}
+                <div className="text-xs text-slate-500 uppercase tracking-widest">
+                  Same marker searched in two patients — click a card to view step detail
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+
+                  {/* Patient A */}
+                  <div className="space-y-3">
+                    <MiniDetectionBadge
+                      result={carrierResult.detection_result}
+                      confidence={carrierResult.confidence}
+                      label="Patient A — Carrier (c.5266dupC present)"
+                      active={activePatient === 'carrier'}
+                      onClick={() => setActivePatient('carrier')}
+                    />
+                    {/* Stats */}
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-2">
+                        <div className="text-slate-500 uppercase tracking-wider mb-0.5">Nodes</div>
+                        <div className="font-mono text-amber-400 font-bold">{carrierResult.total_nodes}</div>
+                        <div className="text-slate-500">{carrierResult.n_qubits} qubits</div>
+                      </div>
+                      <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-2">
+                        <div className="text-slate-500 uppercase tracking-wider mb-0.5">Iter</div>
+                        <div className="font-mono text-blue-300 font-bold">{carrierResult.iterations}</div>
+                        <div className="text-slate-500">Grover steps</div>
+                      </div>
+                      <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-2">
+                        <div className="text-slate-500 uppercase tracking-wider mb-0.5">Marker</div>
+                        <div className={`font-bold ${carrierResult.target_found ? 'text-red-400' : 'text-emerald-400'}`}>
+                          {carrierResult.target_found ? '⚠ YES' : '✓ NO'}
+                        </div>
+                        <div className="text-slate-500">{carrierResult.target_found ? 'present' : 'absent'}</div>
+                      </div>
                     </div>
-                    <div className="text-slate-500 text-xs">{selectedResult.target_found ? 'mutation node present' : 'mutation node absent'}</div>
+                    {/* DNA node table */}
+                    {carrierResult.nodes_preview && (
+                      <NodeTable nodes={carrierResult.nodes_preview} targetBits={carrierResult.marker_bits} />
+                    )}
+                  </div>
+
+                  {/* Patient B */}
+                  <div className="space-y-3">
+                    <MiniDetectionBadge
+                      result={healthyResult.detection_result}
+                      confidence={healthyResult.confidence}
+                      label="Patient B — Healthy Control"
+                      active={activePatient === 'healthy'}
+                      onClick={() => setActivePatient('healthy')}
+                    />
+                    {/* Stats */}
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-2">
+                        <div className="text-slate-500 uppercase tracking-wider mb-0.5">Nodes</div>
+                        <div className="font-mono text-amber-400 font-bold">{healthyResult.total_nodes}</div>
+                        <div className="text-slate-500">{healthyResult.n_qubits} qubits</div>
+                      </div>
+                      <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-2">
+                        <div className="text-slate-500 uppercase tracking-wider mb-0.5">Iter</div>
+                        <div className="font-mono text-blue-300 font-bold">{healthyResult.iterations}</div>
+                        <div className="text-slate-500">Grover steps</div>
+                      </div>
+                      <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-2">
+                        <div className="text-slate-500 uppercase tracking-wider mb-0.5">Marker</div>
+                        <div className={`font-bold ${healthyResult.target_found ? 'text-red-400' : 'text-emerald-400'}`}>
+                          {healthyResult.target_found ? '⚠ YES' : '✓ NO'}
+                        </div>
+                        <div className="text-slate-500">{healthyResult.target_found ? 'present' : 'absent'}</div>
+                      </div>
+                    </div>
+                    {/* DNA node table */}
+                    {healthyResult.nodes_preview && (
+                      <NodeTable nodes={healthyResult.nodes_preview} targetBits={healthyResult.marker_bits} />
+                    )}
                   </div>
                 </div>
 
-                {/* Node table for selected patient */}
-                {selectedResult.nodes_preview && (
-                  <NodeTable nodes={selectedResult.nodes_preview} targetBits={selectedResult.marker_bits} />
-                )}
-
-                {/* Step navigator for selected patient */}
+                {/* Step navigator for the selected patient */}
                 {selectedResult.step_circuits && selectedResult.step_circuits.length > 0 && (
                   <GroverStepNavigator
                     key={activePatient}
