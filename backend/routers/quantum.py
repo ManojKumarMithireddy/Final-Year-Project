@@ -35,6 +35,16 @@ except ImportError:
 router = APIRouter(prefix="/api/search", tags=["quantum"])
 
 
+def _get_timestamp(client_ts: Optional[str]) -> datetime.datetime:
+    """Use browser-supplied ISO timestamp if valid, else fall back to server UTC."""
+    if client_ts:
+        try:
+            return datetime.datetime.fromisoformat(client_ts.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            pass
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 @router.post("/quantum-simulation-poc")
 async def quantum_toy(request: QuantumToyRequest, current_user: Optional[dict] = Depends(get_optional_user)):
     """
@@ -97,7 +107,7 @@ async def quantum_toy(request: QuantumToyRequest, current_user: Optional[dict] =
             "measured_state": measured_state,
             "execution_time_ms": exec_time_ms,
             "noise_level": request.noise_level,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc),
+            "timestamp": _get_timestamp(request.client_timestamp),
         })
 
     return result_data
@@ -179,7 +189,7 @@ async def ibm_submit_job(request: IBMSubmitRequest, current_user: dict = Depends
             "target_bits": request.target_bits,
             "job_id": job.job_id(),
             "backend": backend.name,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc),
+            "timestamp": _get_timestamp(request.client_timestamp),
         })
 
         return job_data
@@ -325,7 +335,7 @@ async def bio_grover_local(
             "detection_result": sim_result["detection_result"],
             "confidence":       sim_result["confidence"],
             "execution_time_ms": sim_result["execution_time_ms"],
-            "timestamp":        datetime.datetime.now(datetime.timezone.utc),
+            "timestamp":        _get_timestamp(request.client_timestamp),
         })
 
     return response
@@ -390,7 +400,7 @@ async def bio_grover_ibm_submit(
             "marker_dna":     marker_seq_clean,
             "job_id":         job.job_id(),
             "backend":        backend.name,
-            "timestamp":      datetime.datetime.now(datetime.timezone.utc),
+            "timestamp":      _get_timestamp(request.client_timestamp),
         })
 
         return {

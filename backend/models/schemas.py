@@ -72,10 +72,13 @@ class QuantumToyRequest(BaseModel):
     target_bits: str
     noise_level: float = Field(default=0.0, ge=0.0, le=0.05,
         description="Depolarizing noise probability per gate (0.0 = ideal, 0.05 = 5% error rate).")
+    client_timestamp: Optional[str] = Field(default=None,
+        description="ISO 8601 timestamp from the browser — stored in history if provided.")
 
 class IBMSubmitRequest(BaseModel):
     """IBM credentials are fetched server-side from the authenticated user's saved credentials."""
     target_bits: str
+    client_timestamp: Optional[str] = None
 
 class IBMStatusRequest(BaseModel):
     """IBM credentials are fetched server-side from the authenticated user's saved credentials."""
@@ -91,8 +94,10 @@ class BioQuantumRequest(BaseModel):
         description="Number of codons per node (1=6 qubits, 2=12 qubits, 3=18 qubits).")
     has_mutation: bool = Field(default=True,
         description="True = patient carries c.5266dupC; False = healthy reference patient.")
+    client_timestamp: Optional[str] = None
 
 class BioIBMSubmitRequest(BaseModel):
     """IBM QPU variant — n_codons fixed to 1 (6 qubits) for free-tier compatibility."""
     n_codons: int = Field(default=1, ge=1, le=1,
         description="Fixed at 1 codon (6 qubits) for IBM free-tier QPU.")
+    client_timestamp: Optional[str] = None

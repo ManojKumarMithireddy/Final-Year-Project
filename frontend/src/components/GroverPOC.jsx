@@ -39,6 +39,11 @@ function MiniDetectionBadge({ result, confidence, label, active, onClick }) {
       </div>
       <div className="mt-2 text-xs text-slate-400">
         Confidence: <span className="font-mono text-white">{(confidence * 100).toFixed(1)}%</span>
+        {confidence >= 0.995 && (
+          <span className="ml-1.5 text-emerald-400/80" title="Grover's algorithm achieves near-perfect amplification when the optimal iteration count lands the target amplitude at sin²(π/2) ≈ 1">
+            ✦ optimal
+          </span>
+        )}
       </div>
       {active && <div className="mt-2 text-xs text-slate-500">↓ step detail below</div>}
     </button>
@@ -225,15 +230,16 @@ export default function GroverPOC() {
     try {
       if (backendType === 'simulator') {
         // Fire both patient scenarios in parallel
+        const ts = new Date().toISOString();
         const [r1, r2] = await Promise.all([
-          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true }),
-          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false }),
+          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true,  client_timestamp: ts }),
+          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false, client_timestamp: ts }),
         ]);
         setCarrierResult(r1.data);
         setHealthyResult(r2.data);
         setActivePatient('carrier');
       } else {
-        const res = await api.post('/search/quantum-poc/bio-ibm-submit', { n_codons: 1 });
+        const res = await api.post('/search/quantum-poc/bio-ibm-submit', { n_codons: 1, client_timestamp: new Date().toISOString() });
         setIbmJobId(res.data.job_id);
         setIbmJobStatus(res.data.status);
         setIbmBackend(res.data.backend ?? '');
@@ -511,6 +517,21 @@ export default function GroverPOC() {
                 {!carrierResult.marker_in_reference && (
                   <div className="bg-emerald-950/30 border border-emerald-700/30 rounded-xl px-4 py-2.5 text-xs text-emerald-400/80 flex items-center gap-2">
                     ✓ Marker is unique in the reference — this is a valid diagnostic comparison
+                  </div>
+                )}
+
+                {/* 100% confidence explanation */}
+                {(carrierResult.confidence >= 0.995 || healthyResult.confidence >= 0.995) && (
+                  <div className="bg-slate-800/40 border border-slate-700/40 rounded-xl px-4 py-3 text-xs text-slate-400 flex items-start gap-2">
+                    <span className="text-emerald-400 mt-0.5 shrink-0">ℹ</span>
+                    <span>
+                      <strong className="text-slate-300">Why 100% confidence?</strong>{' '}
+                      Grover's algorithm uses exactly <em>k = ⌊π/4·√N⌋</em> iterations, where N is the
+                      number of unique DNA nodes. This places the target amplitude at
+                      sin²((2k+1)·arcsin(1/√N)) ≈ 1 — so with {selectedResult?.n_qubits}-qubit
+                      search over ~{carrierResult.total_nodes} nodes, nearly all {1024} shots land on
+                      the target state. This is correct and expected behaviour, not an error.
+                    </span>
                   </div>
                 )}
 
