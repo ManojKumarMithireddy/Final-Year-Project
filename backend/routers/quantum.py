@@ -274,6 +274,11 @@ async def bio_grover_local(
 
     target_bits = encode_dna(marker_seq_clean)
 
+    # Check marker uniqueness: does the mutant marker appear in the healthy reference?
+    # If yes, the marker is too short/non-specific — Grover will "find" it in both patients.
+    ref_nodes_bits  = {nd["bits"] for nd in build_patient_nodes(reference_seq[:use_len], n_codons)}
+    marker_in_reference = target_bits in ref_nodes_bits
+
     # Run constrained Grover on Aer
     try:
         sim_result = run_bio_grover_local(patient_nodes, target_bits, shots=1024)
@@ -289,18 +294,19 @@ async def bio_grover_local(
 
     response = {
         **sim_result,
-        "n_codons":          n_codons,
-        "n_qubits":          n_qubits,
-        "has_mutation":      request.has_mutation,
-        "patient_label":     patient_label,
-        "patient_accession": PATIENT_ACCESSION,
-        "marker_gene":       MARKER_GENE_NAME,
-        "marker_variant":    MARKER_VARIANT,
-        "marker_region":     MARKER_REGION_DESC,
-        "marker_dna":        marker_seq_clean,
-        "marker_bits":       target_bits,
-        "total_nodes":       len(patient_nodes),
-        "nodes_preview":     nodes_preview,
+        "n_codons":             n_codons,
+        "n_qubits":             n_qubits,
+        "has_mutation":         request.has_mutation,
+        "patient_label":        patient_label,
+        "patient_accession":    PATIENT_ACCESSION,
+        "marker_gene":          MARKER_GENE_NAME,
+        "marker_variant":       MARKER_VARIANT,
+        "marker_region":        MARKER_REGION_DESC,
+        "marker_dna":           marker_seq_clean,
+        "marker_bits":          target_bits,
+        "marker_in_reference":  marker_in_reference,
+        "total_nodes":          len(patient_nodes),
+        "nodes_preview":        nodes_preview,
     }
 
     if current_user:

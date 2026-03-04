@@ -86,7 +86,7 @@ function NodeTable({ nodes, targetBits }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function GroverPOC() {
-  const [nCodons, setNCodons]           = useState(1);
+  const [nCodons, setNCodons]           = useState(2);
   const [backendType, setBackendType]   = useState('simulator');
   const [ibmApiKey, setIbmApiKey]       = useState('');
   const [ibmCrn, setIbmCrn]             = useState('');
@@ -435,6 +435,30 @@ export default function GroverPOC() {
                     />
                   </div>
                 </div>
+
+                {/* Specificity warning — marker not unique enough */}
+                {carrierResult.marker_in_reference && (
+                  <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-4 text-sm space-y-2">
+                    <div className="font-semibold text-amber-400 flex items-center gap-2">
+                      ⚠ Marker Not Specific Enough — {nCodons}-codon ({nCodons * 3}-nt) marker appears in both sequences
+                    </div>
+                    <p className="text-amber-200/70 text-xs leading-relaxed">
+                      With only {nCodons * 3} nucleotides, there are only 4<sup>{nCodons * 3}</sup> = {Math.pow(4, nCodons * 3).toLocaleString()} possible sequences.
+                      The BRCA1 reference (~7 kb) has enough nodes that this specific pattern coincidentally appears in the healthy sequence too — so Grover detects it in both patients.
+                      This is a real challenge in molecular diagnostics: <strong className="text-amber-300">markers must be long enough to be unique</strong>.
+                    </p>
+                    <p className="text-amber-300/80 text-xs">
+                      → Increase to <strong>2 codons (12 qubits)</strong> or <strong>3 codons (18 qubits)</strong> for a marker specific enough to discriminate.
+                    </p>
+                  </div>
+                )}
+
+                {/* Clean comparison confirmed */}
+                {!carrierResult.marker_in_reference && (
+                  <div className="bg-emerald-950/30 border border-emerald-700/30 rounded-xl px-4 py-2.5 text-xs text-emerald-400/80 flex items-center gap-2">
+                    ✓ Marker is unique in the reference — this is a valid diagnostic comparison
+                  </div>
+                )}
 
                 {/* Stats row for selected patient */}
                 <div className="grid grid-cols-3 gap-3 text-sm">
