@@ -97,6 +97,8 @@ coverage.xml
 
 review.md
 deployment-review.md
+.agents
+skills-lock.json
 
 # Vercel CLI project link
 .vercel/
