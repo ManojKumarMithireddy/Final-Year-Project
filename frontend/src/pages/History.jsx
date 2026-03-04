@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
   Cpu,
+  Dna,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../lib/api';
@@ -52,6 +53,10 @@ export default function History() {
       return;
     }
     setExpandedId(id);
+
+    // Bio entries render their own panel — no circuit-info needed
+    const isBioType = item.type === 'bio_grover_local' || item.type === 'bio_grover_ibm_submit';
+    if (isBioType) return;
 
     const bits = item.target_bits;
     if (!bits || circuitCache[bits]) return; // already cached or no bits
@@ -120,6 +125,15 @@ export default function History() {
               const bits = item.target_bits;
               const circuit = bits ? circuitCache[bits] : null;
               const stepIdx = getStep(id);
+              const isBio = item.type === 'bio_grover_local' || item.type === 'bio_grover_ibm_submit';
+              const isIBM = item.type === 'quantum_ibm_submit' || item.type === 'bio_grover_ibm_submit';
+
+              const typeLabel = {
+                quantum_local_sim:    'Local Qiskit Simulator',
+                quantum_ibm_submit:   'IBM Cloud Execution',
+                bio_grover_local:     'BRCA1 Bio Simulation',
+                bio_grover_ibm_submit:'BRCA1 IBM Execution',
+              }[item.type] ?? item.type;
 
               return (
                 <motion.div
@@ -136,11 +150,15 @@ export default function History() {
                       <div className="flex items-center gap-4">
                         <div
                           className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                            item.type === 'quantum_ibm_submit'
+                            isBio
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : isIBM
                               ? 'bg-blue-500/20 text-blue-400'
                               : 'bg-amber-500/20 text-amber-400'
                           }`}>
-                          {item.type === 'quantum_ibm_submit' ? (
+                          {isBio ? (
+                            <Dna className="w-5 h-5" />
+                          ) : isIBM ? (
                             <Server className="w-5 h-5" />
                           ) : (
                             <Activity className="w-5 h-5" />
@@ -148,9 +166,7 @@ export default function History() {
                         </div>
                         <div>
                           <h4 className="text-white font-medium flex items-center gap-2">
-                            {item.type === 'quantum_ibm_submit'
-                              ? 'IBM Cloud Execution'
-                              : 'Local Qiskit Simulator'}
+                            {typeLabel}
                             {item.status && (
                               <span
                                 className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold ${
@@ -170,14 +186,44 @@ export default function History() {
                       </div>
 
                       <div className="flex items-center gap-5 md:ml-auto">
-                        <div className="text-right">
-                          <div className="text-xs text-slate-500 mb-1">
-                            Target Bits
+                        {/* Bio: show detection result badge + confidence */}
+                        {isBio && item.detection_result && (
+                          <div className="text-right">
+                            <div className="text-xs text-slate-500 mb-1">Detection</div>
+                            <div className={`text-xs font-bold px-2 py-1 rounded-full ${
+                              item.detection_result === 'FOUND'
+                                ? 'bg-red-500/20 text-red-400'
+                                : 'bg-emerald-500/20 text-emerald-400'
+                            }`}>
+                              {item.detection_result === 'FOUND' ? '🧬 DETECTED' : '✅ NOT FOUND'}
+                            </div>
+                            {item.confidence != null && (
+                              <div className="text-xs text-slate-500 mt-0.5 text-right">
+                                {(item.confidence * 100).toFixed(1)}% conf
+                              </div>
+                            )}
                           </div>
-                          <div className="font-mono text-white bg-slate-950 px-2 py-1 rounded inline-block tracking-widest text-sm">
-                            {item.target_bits || 'N/A'}
+                        )}
+
+                        {/* Bio: show marker variant */}
+                        {isBio && item.marker_variant && (
+                          <div className="text-right hidden sm:block">
+                            <div className="text-xs text-slate-500 mb-1">Variant</div>
+                            <div className="font-mono text-amber-400 text-xs">{item.marker_variant}</div>
                           </div>
-                        </div>
+                        )}
+
+                        {/* Non-bio: show target bits */}
+                        {!isBio && (
+                          <div className="text-right">
+                            <div className="text-xs text-slate-500 mb-1">
+                              Target Bits
+                            </div>
+                            <div className="font-mono text-white bg-slate-950 px-2 py-1 rounded inline-block tracking-widest text-sm">
+                              {item.target_bits || 'N/A'}
+                            </div>
+                          </div>
+                        )}
 
                         {item.measured_state && (
                           <div className="text-right">
@@ -222,6 +268,82 @@ export default function History() {
                         transition={{ duration: 0.2 }}
                         className="overflow-hidden">
                         <div className="border-t border-slate-800 p-5 space-y-5 bg-slate-950/40">
+                          {/* ── Bio entry expanded panel ── */}
+                          {isBio && (
+                            <div className="space-y-4">
+                              {/* Detection result banner */}
+                              {item.detection_result && (
+                                <div className={`rounded-2xl border p-4 flex items-center gap-4 ${
+                                  item.detection_result === 'FOUND'
+                                    ? 'bg-red-900/20 border-red-500/40'
+                                    : 'bg-emerald-900/20 border-emerald-500/40'
+                                }`}>
+                                  <div className={`text-3xl font-black ${item.detection_result === 'FOUND' ? 'text-red-400' : 'text-emerald-400'}`}>
+                                    {item.detection_result === 'FOUND' ? '🧬 DETECTED' : '✅ NOT FOUND'}
+                                  </div>
+                                  {item.confidence != null && (
+                                    <div className="ml-auto text-right">
+                                      <div className="text-xs text-slate-400 mb-0.5">Confidence</div>
+                                      <div className="font-mono font-bold text-white text-lg">
+                                        {(item.confidence * 100).toFixed(1)}%
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Stats grid */}
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-sm">
+                                {[
+                                  { label: 'Patient',   value: item.has_mutation ? 'Carrier' : 'Healthy Control', color: item.has_mutation ? 'text-red-400' : 'text-emerald-400' },
+                                  { label: 'Qubits',    value: item.n_qubits ?? (item.n_codons ? item.n_codons * 6 : '—'), color: 'text-blue-400' },
+                                  { label: 'n_codons',  value: item.n_codons ?? '—', color: 'text-purple-400' },
+                                  { label: 'Time (ms)', value: item.execution_time_ms != null ? item.execution_time_ms.toFixed(1) : '—', color: 'text-amber-400' },
+                                ].map((s) => (
+                                  <div key={s.label} className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                                    <div className="text-slate-500 text-xs uppercase tracking-wider mb-1">{s.label}</div>
+                                    <div className={`font-mono font-bold text-sm ${s.color}`}>{s.value}</div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Marker info */}
+                              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
+                                <div className="text-xs text-slate-500 uppercase tracking-widest mb-2">BRCA1 Marker</div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-400">Variant</span>
+                                  <span className="font-mono text-amber-400 font-bold">{item.marker_variant || '—'}</span>
+                                </div>
+                                {item.marker_dna && (
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-400">Marker DNA</span>
+                                    <span className="font-mono text-emerald-400 tracking-widest">{item.marker_dna}</span>
+                                  </div>
+                                )}
+                                {item.target_bits && (
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-400">Marker Bits</span>
+                                    <span className="font-mono text-slate-300 text-xs tracking-widest">{item.target_bits}</span>
+                                  </div>
+                                )}
+                                {item.patient_label && (
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-400">Patient</span>
+                                    <span className="text-slate-300 text-xs">{item.patient_label}</span>
+                                  </div>
+                                )}
+                                {item.job_id && (
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-400">Job ID</span>
+                                    <span className="font-mono text-slate-400 text-xs truncate max-w-xs">{item.job_id}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* ── Standard Grover entry expanded panel ── */}
+                          {!isBio && (<>
                           {/* Loading state */}
                           {loadingCircuit === id && (
                             <div className="flex items-center gap-3 justify-center py-8 text-slate-400 text-sm">
@@ -318,6 +440,8 @@ export default function History() {
                               </details>
                             </>
                           )}
+                          {/* close !isBio wrapper */}
+                          </>)}
                         </div>
                       </motion.div>
                     )}

@@ -110,8 +110,8 @@ async def circuit_info(target_bits: str = "0000"):
     target bitstring WITHOUT running a simulation. Used by the History page
     to visualize past results on demand.
     """
-    if not target_bits or not all(c in '01' for c in target_bits) or len(target_bits) > 8:
-        raise HTTPException(status_code=400, detail="target_bits must be 1-8 characters of 0/1.")
+    if not target_bits or not all(c in '01' for c in target_bits) or len(target_bits) > 18:
+        raise HTTPException(status_code=400, detail="target_bits must be 1-18 characters of 0/1.")
 
     qc, iterations = build_grover_circuit(target_bits)
     circuit_diagram = str(qc.draw(output="text", fold=-1))
@@ -314,10 +314,17 @@ async def bio_grover_local(
         await db.history.insert_one({
             "email":            current_user["sub"],
             "type":             "bio_grover_local",
+            "target_bits":      target_bits,
+            "measured_state":   sim_result["measured_state"],
             "n_codons":         n_codons,
+            "n_qubits":         n_qubits,
+            "has_mutation":     request.has_mutation,
+            "patient_label":    patient_label,
             "marker_variant":   MARKER_VARIANT,
+            "marker_dna":       marker_seq_clean,
             "detection_result": sim_result["detection_result"],
             "confidence":       sim_result["confidence"],
+            "execution_time_ms": sim_result["execution_time_ms"],
             "timestamp":        datetime.datetime.now(datetime.timezone.utc),
         })
 
@@ -376,8 +383,11 @@ async def bio_grover_ibm_submit(
         await db.history.insert_one({
             "email":          current_user["sub"],
             "type":           "bio_grover_ibm_submit",
+            "target_bits":    target_bits,
             "n_codons":       n_codons,
+            "n_qubits":       n_qubits,
             "marker_variant": MARKER_VARIANT,
+            "marker_dna":     marker_seq_clean,
             "job_id":         job.job_id(),
             "backend":        backend.name,
             "timestamp":      datetime.datetime.now(datetime.timezone.utc),
