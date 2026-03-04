@@ -163,12 +163,15 @@ export default function GroverPOC() {
   const [markerInfo, setMarkerInfo]       = useState(null);
   const [markerLoading, setMarkerLoading] = useState(false);
 
-  const fetchMarker = useCallback(async (codons) => {
+  const fetchMarker = useCallback(async (codons, showToast = false) => {
     setMarkerLoading(true);
     try {
-      const r = await api.get(`/search/quantum-poc/bio-marker?n_codons=${codons}`);
+      const r = await api.get(`/search/quantum-poc/bio-marker?n_codons=${codons}&force=${showToast}`);
       setMarkerInfo(r.data);
-    } catch { /* silent — static fallback shown */ }
+      if (showToast) toast.success('Disease marker refreshed from NCBI.');
+    } catch (err) {
+      if (showToast) toast.error(err.response?.data?.detail ?? 'Failed to fetch marker from NCBI.');
+    }
     setMarkerLoading(false);
   }, []);
 
@@ -310,7 +313,7 @@ export default function GroverPOC() {
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-medium text-slate-400 uppercase tracking-widest">NCBI Data Sources</div>
                   <button
-                    onClick={() => fetchMarker(nCodons)}
+                    onClick={() => fetchMarker(nCodons, true)}
                     disabled={markerLoading}
                     title="Re-fetch marker from NCBI"
                     className="flex items-center gap-1 text-xs text-slate-500 hover:text-amber-400 transition-colors disabled:opacity-40"

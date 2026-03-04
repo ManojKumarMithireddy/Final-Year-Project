@@ -110,8 +110,11 @@ def _ncbi_fetch(
         return None
 
 
-def fetch_patient_dna() -> Optional[str]:
+def fetch_patient_dna(force: bool = False) -> Optional[str]:
     """Fetch full BRCA1 mRNA reference sequence from NCBI (NM_007294.4)."""
+    key = f"{PATIENT_ACCESSION}|None|None"
+    if force and key in _seq_cache:
+        del _seq_cache[key]
     return _ncbi_fetch(PATIENT_ACCESSION)
 
 
