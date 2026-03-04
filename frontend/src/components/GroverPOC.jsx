@@ -47,36 +47,90 @@ function MiniDetectionBadge({ result, confidence, label, active, onClick }) {
 
 // ── Compact node table ────────────────────────────────────────────────────────
 function NodeTable({ nodes, targetBits }) {
+  const targetRowRef = useRef(null);
+  const scrollContainerRef = useRef(null);
+
+  // Auto-scroll to the target (marker) row after results arrive
+  useEffect(() => {
+    if (!targetRowRef.current || !scrollContainerRef.current) return;
+    const timer = setTimeout(() => {
+      const container = scrollContainerRef.current;
+      const row = targetRowRef.current;
+      if (!container || !row) return;
+      const containerTop = container.getBoundingClientRect().top;
+      const rowTop = row.getBoundingClientRect().top;
+      const offset = rowTop - containerTop - container.clientHeight / 2 + row.clientHeight / 2;
+      container.scrollBy({ top: offset, behavior: 'smooth' });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [nodes]);
+
+  const targetNode = nodes.find((nd) => nd.is_target);
+
   return (
     <div className="border border-slate-800 rounded-xl overflow-hidden">
       <div className="px-4 py-2.5 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between">
         <span className="text-xs font-medium text-slate-400 uppercase tracking-widest">Patient DNA Node Table</span>
-        <span className="text-xs text-slate-500">{nodes.length} nodes shown</span>
+        <div className="flex items-center gap-3">
+          {targetNode && (
+            <span className="flex items-center gap-1 text-xs text-amber-400 font-semibold">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
+              </span>
+              Marker at node #{targetNode.position}
+            </span>
+          )}
+          <span className="text-xs text-slate-500">{nodes.length} nodes shown</span>
+        </div>
       </div>
-      <div className="max-h-52 overflow-y-auto">
+      <div ref={scrollContainerRef} className="max-h-52 overflow-y-auto">
         <table className="w-full text-left text-xs">
-          <thead className="sticky top-0 bg-slate-900 border-b border-slate-800">
+          <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 z-10">
             <tr>
               <th className="px-4 py-2 text-slate-500 font-medium">#</th>
               <th className="px-4 py-2 text-slate-500 font-medium">DNA</th>
               <th className="px-4 py-2 text-slate-500 font-medium">Bits</th>
-              <th className="px-4 py-2 text-slate-500 font-medium">Target</th>
+              <th className="px-4 py-2 text-slate-500 font-medium">Match</th>
             </tr>
           </thead>
           <tbody>
-            {nodes.map((nd) => (
-              <tr key={nd.position}
-                className={`border-b border-slate-800/30 hover:bg-slate-800/20 ${nd.is_target ? 'bg-amber-900/25' : ''}`}>
-                <td className="px-4 py-1.5 font-mono text-slate-500">{nd.position}</td>
-                <td className={`px-4 py-1.5 font-mono tracking-widest ${nd.is_target ? 'text-amber-300 font-bold' : 'text-emerald-400'}`}>
-                  {nd.dna}
-                </td>
-                <td className={`px-4 py-1.5 font-mono ${nd.is_target ? 'text-amber-400 font-bold' : 'text-slate-400'}`}>
-                  {nd.bits}
-                </td>
-                <td className="px-4 py-1.5">{nd.is_target && <span className="text-amber-400">🎯</span>}</td>
-              </tr>
-            ))}
+            {nodes.map((nd) =>
+              nd.is_target ? (
+                <motion.tr
+                  key={nd.position}
+                  ref={targetRowRef}
+                  initial={{ opacity: 0, backgroundColor: 'rgba(251,191,36,0)' }}
+                  animate={{ opacity: 1, backgroundColor: ['rgba(251,191,36,0.05)', 'rgba(251,191,36,0.30)', 'rgba(251,191,36,0.18)'] }}
+                  transition={{ duration: 1.2, ease: 'easeInOut', delay: 0.5 }}
+                  className="border-b border-amber-500/40"
+                  style={{ boxShadow: 'inset 3px 0 0 #f59e0b' }}
+                >
+                  <td className="px-4 py-1.5 font-mono text-amber-300/70 font-bold">{nd.position}</td>
+                  <td className="px-4 py-1.5 font-mono tracking-widest text-amber-300 font-black text-sm">
+                    {nd.dna}
+                  </td>
+                  <td className="px-4 py-1.5 font-mono text-amber-400 font-bold tracking-widest">
+                    {nd.bits}
+                  </td>
+                  <td className="px-4 py-1.5">
+                    <span className="inline-flex items-center gap-1 bg-amber-500/20 border border-amber-500/50 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      🎯 MARKER
+                    </span>
+                  </td>
+                </motion.tr>
+              ) : (
+                <tr
+                  key={nd.position}
+                  className="border-b border-slate-800/30 hover:bg-slate-800/20"
+                >
+                  <td className="px-4 py-1.5 font-mono text-slate-500">{nd.position}</td>
+                  <td className="px-4 py-1.5 font-mono tracking-widest text-emerald-400">{nd.dna}</td>
+                  <td className="px-4 py-1.5 font-mono text-slate-400">{nd.bits}</td>
+                  <td className="px-4 py-1.5" />
+                </tr>
+              )
+            )}
           </tbody>
         </table>
       </div>
