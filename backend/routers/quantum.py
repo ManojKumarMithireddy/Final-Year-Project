@@ -299,7 +299,7 @@ async def bio_grover_local(
 
     # Mutant sequence = reference + c.5266dupC insertion (always used for marker extraction)
     mutant_seq       = apply_brca1_mutation(reference_seq)
-    marker_seq_clean = get_marker_seq(mutant_seq, n_codons)  # disease marker from mutant
+    marker_seq_clean = get_marker_seq(mutant_seq, n_codons, offset=request.marker_offset)  # disease marker from mutant
 
     # Patient sequence depends on whether this patient carries the mutation
     patient_seq  = mutant_seq if request.has_mutation else reference_seq

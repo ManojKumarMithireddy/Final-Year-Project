@@ -273,8 +273,8 @@ export default function GroverPOC() {
         // Fire both patient scenarios in parallel
         const ts = new Date().toISOString();
         const [r1, r2] = await Promise.all([
-          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true,  client_timestamp: ts }),
-          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false, client_timestamp: ts }),
+          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true,  marker_offset: markerOffset, client_timestamp: ts }),
+          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false, marker_offset: markerOffset, client_timestamp: ts }),
         ]);
         setCarrierResult(r1.data);
         setHealthyResult(r2.data);

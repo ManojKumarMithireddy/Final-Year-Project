@@ -94,6 +94,8 @@ class BioQuantumRequest(BaseModel):
         description="Number of codons per node (1=6 qubits, 2=12 qubits, 3=18 qubits).")
     has_mutation: bool = Field(default=True,
         description="True = patient carries c.5266dupC; False = healthy reference patient.")
+    marker_offset: int = Field(default=0, ge=-5, le=5,
+        description="Window offset around INSERTION_POS used when the user has refreshed the marker.")
     client_timestamp: Optional[str] = None
 
 class BioIBMSubmitRequest(BaseModel):
