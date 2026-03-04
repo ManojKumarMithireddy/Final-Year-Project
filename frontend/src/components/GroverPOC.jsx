@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Cpu, Dna, Search } from 'lucide-react';
+import { Save, Cpu, Dna, Search, FlaskConical } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
@@ -20,27 +20,28 @@ const countsToProbabilities = (counts) => {
   return Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, v / total]));
 };
 
-// ── Detection badge ───────────────────────────────────────────────────────────
-function DetectionBadge({ result, confidence }) {
+// ── Mini detection badge (for comparison row) ─────────────────────────────────
+function MiniDetectionBadge({ result, confidence, label, active, onClick }) {
   const found = result === 'FOUND';
   return (
-    <motion.div
-      initial={{ scale: 0.85, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      className={`rounded-2xl border p-6 text-center ${
-        found ? 'bg-red-900/30 border-red-500/50' : 'bg-emerald-900/20 border-emerald-500/40'
-      }`}>
-      <div className={`text-3xl font-bold mb-1 ${found ? 'text-red-400' : 'text-emerald-400'}`}>
-        {found ? '🧬 BRCA1 DETECTED' : '✅ NOT FOUND'}
+    <button onClick={onClick} className={`w-full text-left rounded-2xl border p-5 transition-all ${
+      active ? 'ring-2 ring-offset-2 ring-offset-slate-900' : 'opacity-80 hover:opacity-100'
+    } ${found
+      ? `bg-red-900/30 border-red-500/50 ${active ? 'ring-red-500' : ''}`
+      : `bg-emerald-900/20 border-emerald-500/40 ${active ? 'ring-emerald-500' : ''}`
+    }`}>
+      <div className="text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">{label}</div>
+      <div className={`text-xl font-bold mb-1 ${found ? 'text-red-400' : 'text-emerald-400'}`}>
+        {found ? '🧬 DETECTED' : '✅ NOT FOUND'}
       </div>
-      <div className={`text-sm ${found ? 'text-red-300' : 'text-emerald-300'}`}>
-        {found ? 'Disease marker c.5266dupC present in patient DNA' : 'No matching disease marker found'}
+      <div className={`text-xs ${found ? 'text-red-300/80' : 'text-emerald-300/80'}`}>
+        {found ? 'c.5266dupC mutation present' : 'No matching mutation found'}
       </div>
       <div className="mt-2 text-xs text-slate-400">
         Confidence: <span className="font-mono text-white">{(confidence * 100).toFixed(1)}%</span>
-        <span className="ml-2 text-slate-600">({Math.round(confidence * 1024)}/1024 shots matched target)</span>
       </div>
-    </motion.div>
+      {active && <div className="mt-2 text-xs text-slate-500">↓ step detail below</div>}
+    </button>
   );
 }
 
@@ -91,7 +92,16 @@ export default function GroverPOC() {
   const [ibmCrn, setIbmCrn]             = useState('');
   const [credsSaved, setCredsSaved]     = useState(false);
   const [isRunning, setIsRunning]       = useState(false);
-  const [result, setResult]             = useState(null);
+
+  // Simulator comparison state
+  const [carrierResult, setCarrierResult] = useState(null);
+  const [healthyResult, setHealthyResult] = useState(null);
+  const [activePatient, setActivePatient] = useState('carrier');
+  const [carrierStep, setCarrierStep]     = useState(0);
+  const [healthyStep, setHealthyStep]     = useState(0);
+
+  // IBM state (unchanged)
+  const [ibmResult, setIbmResult]       = useState(null);
   const [activeStep, setActiveStep]     = useState(0);
   const [ibmJobId, setIbmJobId]         = useState('');
   const [ibmJobStatus, setIbmJobStatus] = useState('');
@@ -127,7 +137,7 @@ export default function GroverPOC() {
       if (res.data.status === 'DONE') {
         stopPoll();
         const total = Object.values(res.data.counts ?? {}).reduce((a, b) => a + b, 0);
-        setResult((prev) => ({
+        setIbmResult((prev) => ({
           ...prev,
           measured_state:   res.data.measured_state,
           counts:           res.data.counts,
@@ -147,8 +157,12 @@ export default function GroverPOC() {
       toast.error('Please save your IBM credentials first.'); return;
     }
     setIsRunning(true);
-    setResult(null);
+    setCarrierResult(null);
+    setHealthyResult(null);
+    setIbmResult(null);
     setActiveStep(0);
+    setCarrierStep(0);
+    setHealthyStep(0);
     setIbmJobId('');
     setIbmJobStatus('');
     setIbmBackend('');
@@ -156,15 +170,20 @@ export default function GroverPOC() {
 
     try {
       if (backendType === 'simulator') {
-        const res = await api.post('/search/quantum-poc/bio-local', { n_codons: nCodons });
-        setResult(res.data);
+        // Fire both patient scenarios in parallel
+        const [r1, r2] = await Promise.all([
+          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true }),
+          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false }),
+        ]);
+        setCarrierResult(r1.data);
+        setHealthyResult(r2.data);
+        setActivePatient('carrier');
       } else {
-        // IBM path always uses n_codons=1 (6 qubits — free tier)
         const res = await api.post('/search/quantum-poc/bio-ibm-submit', { n_codons: 1 });
         setIbmJobId(res.data.job_id);
         setIbmJobStatus(res.data.status);
         setIbmBackend(res.data.backend ?? '');
-        setResult({ ...res.data, measured_state: null, counts: null, detection_result: null, confidence: 0 });
+        setIbmResult({ ...res.data, measured_state: null, counts: null, detection_result: null, confidence: 0 });
         ibmPollRef.current = setInterval(() => pollIbmStatus(res.data.job_id, res.data.marker_bits), 8000);
       }
     } catch (err) {
@@ -174,6 +193,10 @@ export default function GroverPOC() {
   };
 
   const ibmDone = ibmJobStatus === 'DONE' || ibmJobStatus === 'ERROR' || ibmJobStatus === 'CANCELLED';
+  const selectedResult = activePatient === 'carrier' ? carrierResult : healthyResult;
+  const selectedStep   = activePatient === 'carrier' ? carrierStep   : healthyStep;
+  const setSelectedStep = activePatient === 'carrier' ? setCarrierStep : setHealthyStep;
+  const comparisonReady = carrierResult && healthyResult;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -215,7 +238,7 @@ export default function GroverPOC() {
                   <div>
                     <span className="text-slate-300 font-medium">Patient: </span>
                     <span className="font-mono text-blue-300">NM_007294.4</span>
-                    <span className="text-slate-500 ml-1 text-xs">(BRCA1 mRNA + c.5266dupC simulated carrier)</span>
+                    <span className="text-slate-500 ml-1 text-xs">(BRCA1 mRNA from NCBI)</span>
                   </div>
                 </div>
                 <div className="flex items-start gap-2">
@@ -226,6 +249,18 @@ export default function GroverPOC() {
                     <span className="text-slate-500 ml-1 text-xs">pathogenic — exon 20</span>
                   </div>
                 </div>
+                {backendType === 'simulator' && (
+                  <div className="pt-1 border-t border-slate-800 text-xs text-slate-500 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                      Patient A: NM_007294.4 + c.5266dupC insertion (carrier)
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                      Patient B: NM_007294.4 reference only (healthy)
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Codon selector — hidden for IBM (locked to 1) */}
@@ -307,11 +342,14 @@ export default function GroverPOC() {
                 className="w-full bg-gradient-to-r from-red-700 to-rose-600 hover:from-red-600 hover:to-rose-500 text-white py-4 text-base rounded-xl font-bold transition-all disabled:opacity-50 shadow-lg shadow-red-900/30 flex items-center justify-center gap-3">
                 {isRunning
                   ? <><span className="animate-spin inline-block">⚙</span> Running search…</>
-                  : <><Search className="w-5 h-5" /> Run BRCA1 Detection
-                    <span className="text-sm font-normal opacity-70">
-                      ({backendType === 'ibm_cloud' ? 6 : nQubits} qubits)
-                    </span>
-                  </>}
+                  : backendType === 'simulator'
+                    ? <><FlaskConical className="w-5 h-5" /> Compare Both Patients
+                        <span className="text-sm font-normal opacity-70">({nQubits} qubits each)</span>
+                      </>
+                    : <><Search className="w-5 h-5" /> Run BRCA1 Detection
+                        <span className="text-sm font-normal opacity-70">(6 qubits)</span>
+                      </>
+                }
               </button>
             </div>
           </div>
@@ -351,7 +389,7 @@ export default function GroverPOC() {
                     </div>
                   </div>
                   {!ibmDone && (
-                    <button onClick={() => pollIbmStatus(ibmJobId, result?.marker_bits)}
+                    <button onClick={() => pollIbmStatus(ibmJobId, ibmResult?.marker_bits)}
                       className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm border border-slate-700 shrink-0">
                       Refresh
                     </button>
@@ -361,91 +399,161 @@ export default function GroverPOC() {
             )}
           </AnimatePresence>
 
-          {/* Results */}
+          {/* ── SIMULATOR: Comparison Results ─────────────────────────────────── */}
           <AnimatePresence>
-            {result && (
+            {comparisonReady && (
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
                 className="space-y-6 pt-6 border-t border-slate-800">
 
-                {/* Data provenance row */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Patient</div>
-                    <div className="font-mono text-blue-300 text-xs">{result.patient_accession}</div>
-                    <div className="text-slate-500 text-xs mt-0.5">{result.total_nodes} nodes · {result.n_qubits} qubits</div>
+                {/* Shared marker info */}
+                <div className="bg-red-950/20 border border-red-800/30 rounded-xl p-4 flex flex-wrap gap-4 items-center text-sm">
+                  <div className="text-xs text-red-400 uppercase tracking-wider shrink-0">Disease Marker</div>
+                  <div className="font-mono text-red-300 tracking-widest">{carrierResult.marker_dna}</div>
+                  <div className="font-mono text-slate-500 text-xs">{carrierResult.marker_bits}</div>
+                  <div className="text-slate-500 text-xs ml-auto">{carrierResult.marker_variant} · {carrierResult.marker_region}</div>
+                </div>
+
+                {/* Side-by-side comparison badges */}
+                <div>
+                  <div className="text-xs text-slate-500 uppercase tracking-widest mb-3">
+                    Same marker searched in two patients — click a card to view step detail
                   </div>
-                  <div className="bg-red-950/30 border border-red-800/40 rounded-xl p-4">
-                    <div className="text-xs text-red-400 uppercase tracking-wider mb-1">Disease Marker</div>
-                    <div className="font-mono text-red-300 tracking-widest text-xs">{result.marker_dna}</div>
-                    <div className="font-mono text-slate-400 text-xs">{result.marker_bits}</div>
-                  </div>
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Search Space</div>
-                    <div className="font-mono text-amber-400 font-bold">{result.n_unique}</div>
-                    <div className="text-slate-500 text-xs">of {result.n_unconstrained} states · {result.iterations} iterations</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <MiniDetectionBadge
+                      result={carrierResult.detection_result}
+                      confidence={carrierResult.confidence}
+                      label="Patient A — Carrier (c.5266dupC present)"
+                      active={activePatient === 'carrier'}
+                      onClick={() => setActivePatient('carrier')}
+                    />
+                    <MiniDetectionBadge
+                      result={healthyResult.detection_result}
+                      confidence={healthyResult.confidence}
+                      label="Patient B — Healthy Control"
+                      active={activePatient === 'healthy'}
+                      onClick={() => setActivePatient('healthy')}
+                    />
                   </div>
                 </div>
 
-                {/* Node table */}
-                {result.nodes_preview && (
-                  <NodeTable nodes={result.nodes_preview} targetBits={result.marker_bits} />
+                {/* Stats row for selected patient */}
+                <div className="grid grid-cols-3 gap-3 text-sm">
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Patient</div>
+                    <div className="font-mono text-blue-300 text-xs">{selectedResult.patient_accession}</div>
+                    <div className="text-slate-500 text-xs mt-0.5">{selectedResult.patient_label}</div>
+                  </div>
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Nodes</div>
+                    <div className="font-mono text-amber-400 font-bold">{selectedResult.total_nodes}</div>
+                    <div className="text-slate-500 text-xs">{selectedResult.n_qubits} qubits · {selectedResult.iterations} iter</div>
+                  </div>
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Marker in table</div>
+                    <div className={`font-bold text-sm ${selectedResult.target_found ? 'text-red-400' : 'text-emerald-400'}`}>
+                      {selectedResult.target_found ? '⚠ YES' : '✓ NO'}
+                    </div>
+                    <div className="text-slate-500 text-xs">{selectedResult.target_found ? 'mutation node present' : 'mutation node absent'}</div>
+                  </div>
+                </div>
+
+                {/* Node table for selected patient */}
+                {selectedResult.nodes_preview && (
+                  <NodeTable nodes={selectedResult.nodes_preview} targetBits={selectedResult.marker_bits} />
                 )}
 
-                {/* Step navigator — simulator path */}
-                {result.step_circuits && result.step_circuits.length > 0 && (
+                {/* Step navigator for selected patient */}
+                {selectedResult.step_circuits && selectedResult.step_circuits.length > 0 && (
                   <GroverStepNavigator
-                    stepCircuits={result.step_circuits}
-                    activeStep={activeStep}
-                    onStepChange={setActiveStep}
-                    targetBits={result.marker_bits}
+                    key={activePatient}
+                    stepCircuits={selectedResult.step_circuits}
+                    activeStep={selectedStep}
+                    onStepChange={setSelectedStep}
+                    targetBits={selectedResult.marker_bits}
                   />
                 )}
 
-                {/* IBM: counts histogram when done */}
-                {!result.step_circuits && result.counts && (
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── IBM: Single Result ────────────────────────────────────────────── */}
+          <AnimatePresence>
+            {ibmResult && (
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+                className="space-y-6 pt-6 border-t border-slate-800">
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Patient</div>
+                    <div className="font-mono text-blue-300 text-xs">{ibmResult.patient_accession}</div>
+                    <div className="text-slate-500 text-xs mt-0.5">{ibmResult.total_nodes} nodes · {ibmResult.n_qubits} qubits</div>
+                  </div>
+                  <div className="bg-red-950/30 border border-red-800/40 rounded-xl p-4">
+                    <div className="text-xs text-red-400 uppercase tracking-wider mb-1">Disease Marker</div>
+                    <div className="font-mono text-red-300 tracking-widest text-xs">{ibmResult.marker_dna}</div>
+                    <div className="font-mono text-slate-400 text-xs">{ibmResult.marker_bits}</div>
+                  </div>
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Search Space</div>
+                    <div className="font-mono text-amber-400 font-bold">{ibmResult.n_unique}</div>
+                    <div className="text-slate-500 text-xs">of {ibmResult.n_unconstrained} states · {ibmResult.iterations} iterations</div>
+                  </div>
+                </div>
+
+                {ibmResult.counts && (
                   <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-5">
                     <div className="text-xs font-medium text-slate-400 uppercase tracking-widest mb-3">
                       QPU Measurement Distribution
-                      <span className="ml-2 text-slate-600 font-normal normal-case">
-                        {Object.values(result.counts).reduce((a, b) => a + b, 0).toLocaleString()} shots
-                      </span>
                     </div>
                     <AmplitudeChart
-                      probabilities={countsToProbabilities(result.counts)}
-                      targetBits={result.marker_bits}
+                      probabilities={countsToProbabilities(ibmResult.counts)}
+                      targetBits={ibmResult.marker_bits}
                       stepIndex={3}
                     />
                   </div>
                 )}
 
-                {/* IBM circuit diagram */}
-                {!result.step_circuits && result.circuit_diagram && (
+                {ibmResult.circuit_diagram && (
                   <div className="border border-slate-800 rounded-xl overflow-hidden">
                     <div className="px-4 py-2.5 bg-slate-900/80 border-b border-slate-800 text-xs font-medium text-slate-400 uppercase tracking-widest">
                       Transpiled Circuit
                     </div>
                     <div className="p-5 overflow-x-auto">
-                      <pre className="text-[10px] text-amber-500/70 leading-tight">{result.circuit_diagram}</pre>
+                      <pre className="text-[10px] text-amber-500/70 leading-tight">{ibmResult.circuit_diagram}</pre>
                     </div>
                   </div>
                 )}
 
-                {/* IBM waiting */}
-                {ibmJobId && !ibmDone && !result.counts && (
+                {ibmJobId && !ibmDone && !ibmResult.counts && (
                   <motion.div animate={{ opacity: [0.4,1,0.4] }} transition={{ duration: 1.5, repeat: Infinity }}
                     className="text-center py-4 text-slate-500 text-sm">
                     ⏳ Waiting for IBM QPU — auto-checking every 8s
                   </motion.div>
                 )}
 
-                {/* Detection badge */}
-                {result.detection_result && result.measured_state && (
-                  <DetectionBadge result={result.detection_result} confidence={result.confidence} />
+                {ibmResult.detection_result && ibmResult.measured_state && (
+                  <motion.div
+                    initial={{ scale: 0.85, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className={`rounded-2xl border p-6 text-center ${
+                      ibmResult.detection_result === 'FOUND'
+                        ? 'bg-red-900/30 border-red-500/50'
+                        : 'bg-emerald-900/20 border-emerald-500/40'
+                    }`}>
+                    <div className={`text-3xl font-bold mb-1 ${ibmResult.detection_result === 'FOUND' ? 'text-red-400' : 'text-emerald-400'}`}>
+                      {ibmResult.detection_result === 'FOUND' ? '🧬 BRCA1 DETECTED' : '✅ NOT FOUND'}
+                    </div>
+                    <div className="mt-2 text-xs text-slate-400">
+                      Confidence: <span className="font-mono text-white">{(ibmResult.confidence * 100).toFixed(1)}%</span>
+                    </div>
+                  </motion.div>
                 )}
 
               </motion.div>
             )}
           </AnimatePresence>
+
         </div>
       </div>
     </div>

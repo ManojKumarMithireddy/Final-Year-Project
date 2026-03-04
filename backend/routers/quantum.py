@@ -249,15 +249,18 @@ async def bio_grover_local(
     n_codons = request.n_codons
     n_qubits = n_codons * 6
 
-    # Fetch BRCA1 reference from NCBI, then apply c.5266dupC to simulate a carrier patient
+    # Fetch BRCA1 reference from NCBI
     reference_seq = fetch_patient_dna()
     if not reference_seq:
         raise HTTPException(status_code=502, detail="Failed to fetch patient DNA from NCBI (NM_007294.4).")
 
-    patient_seq = apply_brca1_mutation(reference_seq)  # simulated carrier
+    # Mutant sequence = reference + c.5266dupC insertion (always used for marker extraction)
+    mutant_seq       = apply_brca1_mutation(reference_seq)
+    marker_seq_clean = get_marker_seq(mutant_seq, n_codons)  # disease marker from mutant
 
-    # Disease marker = the mutant codon containing the dupC insertion
-    marker_seq_clean = get_marker_seq(patient_seq, n_codons)
+    # Patient sequence depends on whether this patient carries the mutation
+    patient_seq  = mutant_seq if request.has_mutation else reference_seq
+    patient_label = "Carrier (c.5266dupC present)" if request.has_mutation else "Healthy Control"
 
     # Build patient node table — scale with qubit capacity
     # We use enough sequence to fill 2^n_qubits slots at most (preventing huge tables)
@@ -288,6 +291,8 @@ async def bio_grover_local(
         **sim_result,
         "n_codons":          n_codons,
         "n_qubits":          n_qubits,
+        "has_mutation":      request.has_mutation,
+        "patient_label":     patient_label,
         "patient_accession": PATIENT_ACCESSION,
         "marker_gene":       MARKER_GENE_NAME,
         "marker_variant":    MARKER_VARIANT,

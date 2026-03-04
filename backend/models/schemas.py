@@ -85,9 +85,12 @@ class BioQuantumRequest(BaseModel):
     """
     Request for the constrained BRCA1 Grover search PoC.
     n_codons controls both the NCBI fetch volume and the qubit count (n_qubits = n_codons * 6).
+    has_mutation: True = carrier (c.5266dupC present); False = healthy control (no mutation).
     """
     n_codons: int = Field(default=1, ge=1, le=3,
         description="Number of codons per node (1=6 qubits, 2=12 qubits, 3=18 qubits).")
+    has_mutation: bool = Field(default=True,
+        description="True = patient carries c.5266dupC; False = healthy reference patient.")
 
 class BioIBMSubmitRequest(BaseModel):
     """IBM QPU variant — n_codons fixed to 1 (6 qubits) for free-tier compatibility."""
