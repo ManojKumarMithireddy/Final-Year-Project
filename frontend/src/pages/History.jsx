@@ -37,12 +37,23 @@ export default function History() {
   }, []);
 
   const formatDate = (dateString) => {
-    const d = new Date(dateString);
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
+    if (!dateString) return '—';
+    // MongoDB may return naive ISO strings without a timezone suffix (e.g. "2026-03-04T09:08:36").
+    // Without a suffix, browsers parse them as *local* time instead of UTC, causing wrong display.
+    // Appending 'Z' forces UTC interpretation; Intl.DateTimeFormat then converts to the
+    // user's local timezone automatically.
+    // Detect Z suffix or ±HH:MM / ±HHMM numeric offset (positive or negative)
+    const hasZone = /Z$|[+-]\d{2}:?\d{2}$/.test(dateString);
+    const utcStr = hasZone ? dateString : dateString + 'Z';
+    const d = new Date(utcStr);
+    if (isNaN(d.getTime())) return dateString; // fallback: return raw string if unparseable
+    return new Intl.DateTimeFormat(undefined, {   // undefined = user's browser locale
+      year:   'numeric',
+      month:  'short',
+      day:    'numeric',
+      hour:   '2-digit',
       minute: '2-digit',
+      timeZoneName: 'short',
     }).format(d);
   };
 

@@ -328,11 +328,21 @@ async def bio_grover_local(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Quantum simulation error: {exc}")
 
-    # Build a node table preview (first 64 nodes for UI)
+    # Build a node table preview (up to 64 nodes) — the target node is ALWAYS
+    # included even when it falls beyond the first 64 positions (e.g. position
+    # ~877 for n_codons=2 at INSERTION_POS 5266), otherwise the frontend table
+    # would show "DETECTED" with no highlighted row.
+    PREVIEW_SIZE = 64
+    target_node = next((nd for nd in patient_nodes if nd["bits"] == target_bits), None)
+    if target_node:
+        early = [nd for nd in patient_nodes[:PREVIEW_SIZE - 1] if nd["bits"] != target_bits]
+        preview_src = sorted(early + [target_node], key=lambda nd: nd["position"])
+    else:
+        preview_src = patient_nodes[:PREVIEW_SIZE]
     nodes_preview = [
         {"position": nd["position"], "dna": nd["dna"], "bits": nd["bits"],
          "is_target": nd["bits"] == target_bits}
-        for nd in patient_nodes[:64]
+        for nd in preview_src
     ]
 
     response = {

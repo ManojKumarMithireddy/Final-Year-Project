@@ -167,17 +167,17 @@ export default function GroverPOC() {
   const [markerOffset, setMarkerOffset]       = useState(0);  // index into nearbyWindows (0 = centre)
   const [nearbyWindows, setNearbyWindows]     = useState([]);  // pre-fetched from backend
 
-  const fetchMarker = useCallback(async (codons, showToast = false) => {
+  const fetchMarker = useCallback(async (codons, showToast = false, offset = 0) => {
     setMarkerLoading(true);
     try {
-      const r = await api.get(`/search/quantum-poc/bio-marker?n_codons=${codons}&force=${showToast}`);
+      const r = await api.get(`/search/quantum-poc/bio-marker?n_codons=${codons}&force=${showToast}&offset=${offset}`);
       setMarkerInfo(r.data);
       // store the pre-computed windows array if the backend returned it
       if (r.data.nearby_windows?.length) setNearbyWindows(r.data.nearby_windows);
       setMarkerFetchedAt(new Date());
       setMarkerFlash(true);
       setTimeout(() => setMarkerFlash(false), 800);
-      if (showToast) toast.success('Marker re-fetched from NCBI.');
+      if (showToast) toast.success('Marker window shifted — adjacent node around c.5266dupC.');
     } catch (err) {
       if (showToast) toast.error(err.response?.data?.detail ?? 'Failed to reach NCBI. Try again shortly.');
     }
@@ -338,15 +338,16 @@ export default function GroverPOC() {
                   <div className="text-xs font-medium text-slate-400 uppercase tracking-widest">NCBI Data Sources</div>
                   <button
                     onClick={() => {
+                      const next = markerOffset + 1;
+                      const nextOffset = next > 5 ? -5 : next;
+                      setMarkerOffset(nextOffset);
                       if (nearbyWindows.length) {
-                        // cycle locally through the pre-fetched windows — instant, no API call
-                        const next = markerOffset + 1;
-                        const maxOffset = nearbyWindows.length - 1 - 5; // 5 = CENTRE_IDX
-                        setMarkerOffset(next > maxOffset ? -5 : next);
+                        // fast path: cycle locally through pre-fetched windows
                         setMarkerFlash(true);
                         setTimeout(() => setMarkerFlash(false), 800);
                       } else {
-                        fetchMarker(nCodons, true);
+                        // always works — fetch the specific offset directly from the API
+                        fetchMarker(nCodons, true, nextOffset);
                       }
                     }}
                     disabled={markerLoading}
