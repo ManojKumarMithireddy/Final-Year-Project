@@ -330,7 +330,228 @@ def run_bio_grover_local(
         "confidence":        round(conf, 4),
         "init_probs":        init_probs,
         "circuit_diagram":   _build_display_circuit(n, target_bits, k),
+        "step_circuits":     build_bio_step_circuits(patient_nodes, target_bits),
     }
+
+
+
+
+# ---------------------------------------------------------------------------
+# Step-by-step circuit breakdown (for GroverStepNavigator)
+# ---------------------------------------------------------------------------
+
+def build_bio_step_circuits(
+    patient_nodes: List[Dict],
+    target_bits:   str,
+) -> list:
+    """
+    Returns 4-step breakdown for GroverStepNavigator.
+    Probability distributions computed from numpy statevectors.
+    Gate diagrams built with Qiskit draw() — never transpiled or run.
+    """
+    n     = len(target_bits)
+    n_max = 1 << n
+
+    # Rebuild operators (same as run_bio_grover_local)
+    seen: Dict[str, bool] = {}
+    for nd in patient_nodes:
+        seen.setdefault(nd["bits"], True)
+    unique_bits = list(seen.keys())
+    N           = len(unique_bits)
+    k           = max(1, floor(pi / 4 * sqrt(N)))
+
+    amplitude = 1.0 / sqrt(N)
+    sv0       = np.zeros(n_max, dtype=complex)
+    for bits in unique_bits:
+        sv0[int(bits, 2)] = amplitude
+
+    oracle_diag                    = np.ones(n_max, dtype=complex)
+    oracle_diag[int(target_bits, 2)] = -1.0
+    D = 2.0 * np.outer(sv0, sv0.conj()) - np.eye(n_max, dtype=complex)
+
+    basis_labels = [format(i, f"0{n}b") for i in range(n_max)]
+
+    def _probs(state: np.ndarray) -> Dict[str, float]:
+        p = np.abs(state) ** 2
+        return {label: round(float(p[i]), 6) for i, label in enumerate(basis_labels)}
+
+    # ── Compute probability snapshots ─────────────────────────────────────────
+    probs_step1 = _probs(sv0)
+
+    s2 = oracle_diag * sv0
+    probs_step2 = _probs(s2)
+
+    s3 = D @ s2
+    probs_step3 = _probs(s3)
+
+    # Step 4: after all k iterations
+    state = sv0.copy()
+    for _ in range(k):
+        state = oracle_diag * state
+        state = D @ state
+    probs_step4 = _probs(state)
+
+    # ── Gate diagrams using Qiskit (draw only, no execution) ──────────────────
+    x_count = sum(1 for bit in target_bits if bit == "0")
+
+    # Step 1: constrained state prep shown as a named box
+    qc1 = QuantumCircuit(n)
+    qc1.append(QuantumCircuit(n, name="DNA|ψ₀⟩").to_gate(), range(n))
+    diag1 = str(qc1.draw(output="text", fold=-1))
+
+    # Step 2: Oracle — actual X / H / MCX gates
+    qc2 = QuantumCircuit(n)
+    for i, bit in enumerate(reversed(target_bits)):
+        if bit == "0":
+            qc2.x(i)
+    qc2.h(n - 1)
+    if n > 1:
+        qc2.mcx(list(range(n - 1)), n - 1)
+    qc2.h(n - 1)
+    for i, bit in enumerate(reversed(target_bits)):
+        if bit == "0":
+            qc2.x(i)
+    diag2 = str(qc2.draw(output="text", fold=-1))
+
+    # Step 3: Diffusion — actual H / X / MCX gates
+    qc3 = QuantumCircuit(n)
+    qc3.h(range(n))
+    qc3.x(range(n))
+    qc3.h(n - 1)
+    if n > 1:
+        qc3.mcx(list(range(n - 1)), n - 1)
+    qc3.h(n - 1)
+    qc3.x(range(n))
+    qc3.h(range(n))
+    diag3 = str(qc3.draw(output="text", fold=-1))
+
+    # Step 4: Measurement
+    qc4 = QuantumCircuit(n)
+    qc4.measure_all()
+    diag4 = str(qc4.draw(output="text", fold=-1))
+
+    return [
+        {
+            "step": 1,
+            "label": "Constrained Initialisation",
+            "description": (
+                f"Instead of H⊗{n} (uniform over all {n_max} states), "
+                f"DNA|ψ₀⟩ loads only the {N} unique DNA nodes from the patient table. "
+                f"Each node gets amplitude 1/√{N}; states absent from the patient data have zero amplitude."
+            ),
+            "diagram": diag1,
+            "gates": [
+                {
+                    "name": "DNA State Preparation",
+                    "symbol": "DNA|ψ₀⟩",
+                    "count": 1,
+                    "explanation": (
+                        f"Prepares a uniform superposition over {N} unique BRCA1 DNA nodes "
+                        f"(from NM_007294.4). Search space constrained to {N}/{n_max} states — "
+                        "only biologically real patterns carry non-zero amplitude."
+                    ),
+                }
+            ],
+            "probabilities": probs_step1,
+        },
+        {
+            "step": 2,
+            "label": "Oracle",
+            "description": (
+                f"Phase-flip the BRCA1 c.5266dupC marker |{target_bits}⟩ (amplitude × −1). "
+                f"X gates flip '0' qubits to |1⟩, an H-MCX-H sequence implements controlled-Z, "
+                f"then X gates restore the basis."
+            ),
+            "diagram": diag2,
+            "gates": [
+                {
+                    "name": "Pauli-X (NOT)",
+                    "symbol": "X",
+                    "count": x_count * 2,
+                    "explanation": (
+                        f"{x_count} X gate(s) before the MCX flip '0' qubits so the controlled gate "
+                        f"fires on the correct state; {x_count} after restore the basis."
+                    ),
+                },
+                {
+                    "name": "Hadamard (H)",
+                    "symbol": "H",
+                    "count": 2,
+                    "explanation": "Sandwiches MCX on qubit n−1, converting it to a phase flip (H·MCX·H ≡ controlled-Z).",
+                },
+                {
+                    "name": "Multi-Controlled-X (MCX)",
+                    "symbol": "MCX",
+                    "count": 1,
+                    "explanation": (
+                        f"Flips qubit {n-1} when all {n-1} controls are |1⟩. "
+                        f"With H sandwich, phase-flips the target state |{target_bits}⟩."
+                    ),
+                },
+            ],
+            "probabilities": probs_step2,
+        },
+        {
+            "step": 3,
+            "label": "Constrained Diffusion",
+            "description": (
+                f"Inversion about the constrained mean |ψ₀⟩: 2|ψ₀⟩⟨ψ₀| − I. "
+                f"Amplifies the disease marker's probability within the DNA node subspace. "
+                f"Repeated {k}× ≈ π/4·√{N}."
+            ),
+            "diagram": diag3,
+            "gates": [
+                {
+                    "name": "Hadamard (H)",
+                    "symbol": "H",
+                    "count": n * 2,
+                    "explanation": (
+                        f"Applied to all {n} qubits before and after the X+MCX layer. "
+                        "Rotates to/from the Hadamard basis to perform inversion about the mean."
+                    ),
+                },
+                {
+                    "name": "Pauli-X (NOT)",
+                    "symbol": "X",
+                    "count": n * 2,
+                    "explanation": f"Applied to all {n} qubits twice — implements inversion about the |0…0⟩ state.",
+                },
+                {
+                    "name": "Multi-Controlled-X (MCX)",
+                    "symbol": "MCX",
+                    "count": 1,
+                    "explanation": (
+                        f"With the H sandwich on qubit {n-1} implements a phase flip on |1…1⟩. "
+                        "Combined with surrounding X gates, completes the inversion about the mean."
+                    ),
+                },
+            ],
+            "probabilities": probs_step3,
+        },
+        {
+            "step": 4,
+            "label": "Measurement",
+            "description": (
+                f"After {k} iteration(s) the disease marker |{target_bits}⟩ has "
+                f"probability ≈ 1. Measuring all {n} qubits collapses the superposition — "
+                f"if the top result matches the marker, BRCA1 mutation is detected."
+            ),
+            "diagram": diag4,
+            "gates": [
+                {
+                    "name": "Measurement (M)",
+                    "symbol": "⊗",
+                    "count": n,
+                    "explanation": (
+                        f"Each of the {n} qubits is projected onto {{|0⟩, |1⟩}}. "
+                        f"After {k} Grover iteration(s), the amplitude of the BRCA1 marker "
+                        f"|{target_bits}⟩ is ≈ 1, so the classical result matches with high probability."
+                    ),
+                }
+            ],
+            "probabilities": probs_step4,
+        },
+    ]
 
 
 def build_bio_grover_ibm(
