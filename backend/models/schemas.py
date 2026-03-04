@@ -80,3 +80,16 @@ class IBMSubmitRequest(BaseModel):
 class IBMStatusRequest(BaseModel):
     """IBM credentials are fetched server-side from the authenticated user's saved credentials."""
     job_id: str
+
+class BioQuantumRequest(BaseModel):
+    """
+    Request for the constrained BRCA1 Grover search PoC.
+    n_codons controls both the NCBI fetch volume and the qubit count (n_qubits = n_codons * 6).
+    """
+    n_codons: int = Field(default=1, ge=1, le=3,
+        description="Number of codons per node (1=6 qubits, 2=12 qubits, 3=18 qubits).")
+
+class BioIBMSubmitRequest(BaseModel):
+    """IBM QPU variant — n_codons capped at 2 (12 qubits) to fit real QPU capacity."""
+    n_codons: int = Field(default=1, ge=1, le=2,
+        description="Number of codons per node for IBM QPU run (max 2 = 12 qubits).")
