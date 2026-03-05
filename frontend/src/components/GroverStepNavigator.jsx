@@ -13,9 +13,125 @@
  *   targetBits    – bitstring used as the search target (for AmplitudeChart)
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AmplitudeChart from './AmplitudeChart';
+
+// ── DNA decoding (00=A, 01=C, 10=G, 11=T) ─────────────────────────────────────
+const DEC_BITS = { '00': 'A', '01': 'C', '10': 'G', '11': 'T' };
+function bitsToDna(bits) {
+  let s = '';
+  for (let i = 0; i < bits.length; i += 2) s += DEC_BITS[bits.slice(i, i + 2)] ?? '?';
+  return s;
+}
+
+// ── State Vector Panel ────────────────────────────────────────────────────────
+function StateVectorPanel({ probabilities, targetBits }) {
+  const entries = useMemo(() => {
+    if (!probabilities) return [];
+    return Object.entries(probabilities)
+      .map(([state, prob]) => ({
+        state,
+        prob,
+        amplitude: Math.sqrt(prob),
+        dna: bitsToDna(state),
+        isTarget: state === targetBits,
+      }))
+      .sort((a, b) => b.prob - a.prob);
+  }, [probabilities, targetBits]);
+
+  if (!entries.length) return null;
+
+  const maxProb = entries[0].prob;
+  const significant = entries.filter((e) => e.amplitude > 0.01);
+
+  return (
+    <div className="border-t border-slate-800/60 px-5 py-4">
+      {/* Section header */}
+      <div className="flex items-center gap-3 mb-3">
+        <span className="text-[10px] text-slate-500 uppercase tracking-widest font-medium">
+          Basis State Probabilities
+        </span>
+        <span className="flex-1 h-px bg-slate-800" />
+        <span className="text-[10px] text-slate-600">{entries.length} states · magnitudes only</span>
+      </div>
+
+      {/* Magnitude decomposition — note: √p is always positive; phase signs (e.g. oracle −ψ) are not transmitted by the backend */}
+      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 mb-1 font-mono text-xs overflow-x-auto whitespace-nowrap">
+        <span className="text-slate-500 mr-2">√p decomp =</span>
+        {significant.slice(0, 6).map((e, i) => (
+          <span key={e.state}>
+            {i > 0 && <span className="text-slate-600 mx-2">+</span>}
+            <span className={e.isTarget ? 'text-amber-400' : 'text-sky-300'}>
+              {e.amplitude.toFixed(4)}
+            </span>
+            <span className={`ml-0.5 ${e.isTarget ? 'text-amber-300 font-bold' : 'text-slate-300'}`}>
+              |{e.state}⟩
+            </span>
+          </span>
+        ))}
+        {significant.length > 6 && (
+          <span className="text-slate-600 ml-2">+ {significant.length - 6} more…</span>
+        )}
+      </div>
+      <p className="text-[10px] text-slate-600 italic mb-3 px-1">
+        ⚠ Phase signs (e.g. oracle −|target⟩) are not recoverable from probabilities alone — magnitudes shown.
+      </p>
+
+      {/* Amplitude table */}
+      <div className="border border-slate-800 rounded-xl overflow-hidden">
+        <div className="max-h-60 overflow-y-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 z-10">
+              <tr>
+                <th className="px-3 py-2 text-slate-500 font-medium">|state⟩</th>
+                <th className="px-3 py-2 text-slate-500 font-medium">DNA</th>
+                <th className="px-3 py-2 text-slate-500 font-medium text-right">magnitude √p</th>
+                <th className="px-3 py-2 text-slate-500 font-medium text-right">prob |ψ|²</th>
+                <th className="px-3 py-2 text-slate-500 font-medium">distribution</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr
+                  key={e.state}
+                  className={`border-b border-slate-800/30 ${e.isTarget ? 'bg-amber-950/20' : 'hover:bg-slate-800/20'}`}
+                  style={e.isTarget ? { boxShadow: 'inset 3px 0 0 rgba(245,158,11,0.6)' } : {}}
+                >
+                  <td className={`px-3 py-1.5 font-mono tracking-widest ${e.isTarget ? 'text-amber-300 font-bold' : 'text-slate-300'}`}>
+                    |{e.state}⟩
+                    {e.isTarget && (
+                      <span className="ml-1.5 text-[9px] bg-amber-500/20 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded-full align-middle">
+                        🎯
+                      </span>
+                    )}
+                  </td>
+                  <td className={`px-3 py-1.5 font-mono tracking-widest ${e.isTarget ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {e.dna}
+                  </td>
+                  <td className={`px-3 py-1.5 font-mono text-right tabular-nums ${e.isTarget ? 'text-amber-300' : 'text-sky-300'}`}>
+                    {e.amplitude.toFixed(4)}
+                  </td>
+                  <td className="px-3 py-1.5 font-mono text-slate-400 text-right tabular-nums">
+                    {(e.prob * 100).toFixed(2)}%
+                  </td>
+                  <td className="px-3 py-1.5 w-24">
+                    <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden w-20">
+                      <div
+                        className={`h-full rounded-full ${e.isTarget ? 'bg-amber-400' : 'bg-sky-500/50'}`}
+                        style={{ width: `${(e.prob / maxProb) * 100}%` }}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const STEP_COLORS = [
   {
@@ -167,6 +283,14 @@ export default function GroverStepNavigator({
                   stepIndex={activeStep}
                 />
               </div>
+            )}
+
+            {/* State vector table */}
+            {currentStep.probabilities && (
+              <StateVectorPanel
+                probabilities={currentStep.probabilities}
+                targetBits={targetBits}
+              />
             )}
           </motion.div>
         )}
