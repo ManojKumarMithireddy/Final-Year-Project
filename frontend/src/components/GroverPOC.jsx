@@ -155,10 +155,16 @@ export default function GroverPOC() {
   const [markerOffset, setMarkerOffset]       = useState(0);  // index into nearbyWindows (0 = centre)
   const [nearbyWindows, setNearbyWindows]     = useState([]);  // pre-fetched from backend
 
+  // Nonce ref: incremented on every codon change so in-flight fetches for old
+  // codon counts cannot overwrite state after the user switches.
+  const fetchNonce = useRef(0);
+
   const fetchMarker = useCallback(async (codons, showToast = false, offset = 0) => {
+    const myNonce = fetchNonce.current;
     setMarkerLoading(true);
     try {
       const r = await api.get(`/search/quantum-poc/bio-marker?n_codons=${codons}&force=${showToast}&offset=${offset}`);
+      if (fetchNonce.current !== myNonce) return;
       setMarkerInfo(r.data);
       // store the pre-computed windows array if the backend returned it
       if (r.data.nearby_windows?.length) setNearbyWindows(r.data.nearby_windows);
@@ -167,18 +173,25 @@ export default function GroverPOC() {
       setTimeout(() => setMarkerFlash(false), 800);
       if (showToast) toast.success('Marker window shifted — adjacent node around c.5266dupC.');
     } catch (err) {
-      if (showToast) toast.error(err.response?.data?.detail ?? 'Failed to reach NCBI. Try again shortly.');
+      if (fetchNonce.current !== myNonce) return;
+      // Always surface errors — user explicitly clicked to fetch
+      toast.error(err.response?.data?.detail ?? 'Failed to reach NCBI. Try again shortly.');
+    } finally {
+      if (fetchNonce.current === myNonce) setMarkerLoading(false);
     }
-    setMarkerLoading(false);
   }, []);
 
-  // Reset offset, nearby windows, and custom marker when codon count changes
+  // Reset offset, nearby windows, custom marker, and stale marker data when codon count changes.
+  // Auto-fetch is intentionally removed — the user must click "Fetch from NCBI" explicitly.
+  // Incrementing the nonce cancels any in-flight fetch for the previous codon count.
   useEffect(() => {
+    fetchNonce.current += 1;
     setMarkerOffset(0);
     setNearbyWindows([]);
     setCustomMarkerDna('');
-    fetchMarker(nCodons, false, 0);
-  }, [nCodons, fetchMarker]);
+    setMarkerInfo(null);
+    setMarkerLoading(false);
+  }, [nCodons]);
 
   // Derived: what the marker display should show right now
   // nearbyWindows is sorted offset -5..+5; index 5 = centre (offset 0)
@@ -261,27 +274,39 @@ export default function GroverPOC() {
               <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3 text-sm">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-medium text-slate-400 uppercase tracking-widest">NCBI Data Sources</div>
-                  <button
-                    onClick={() => {
-                      const next = markerOffset + 1;
-                      const nextOffset = next > 5 ? -5 : next;
-                      setMarkerOffset(nextOffset);
-                      if (nearbyWindows.length) {
-                        // fast path: cycle locally through pre-fetched windows
-                        setMarkerFlash(true);
-                        setTimeout(() => setMarkerFlash(false), 800);
-                      } else {
-                        // always works — fetch the specific offset directly from the API
-                        fetchMarker(nCodons, true, nextOffset);
-                      }
-                    }}
-                    disabled={markerLoading}
-                    title="Cycle to next node window around c.5266dupC hotspot"
-                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-amber-400 transition-colors disabled:opacity-40"
-                  >
-                    <RotateCcw className={`w-3 h-3 ${markerLoading ? 'animate-spin' : ''}`} />
-                    {markerLoading ? 'Fetching…' : `Refresh marker${markerOffset !== 0 ? ` (${markerOffset > 0 ? '+' : ''}${markerOffset})` : ''}`}
-                  </button>
+                  {!markerInfo ? (
+                    <button
+                      onClick={() => fetchMarker(nCodons, false, 0)}
+                      disabled={markerLoading}
+                      title="Fetch BRCA1 marker window from NCBI"
+                      className="flex items-center gap-1.5 text-xs bg-amber-500/20 border border-amber-500/50 text-amber-300 hover:bg-amber-500/30 px-2.5 py-1 rounded-lg transition-all disabled:opacity-40 font-medium"
+                    >
+                      <RotateCcw className={`w-3 h-3 ${markerLoading ? 'animate-spin' : ''}`} />
+                      {markerLoading ? 'Fetching…' : 'Fetch from NCBI'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        const next = markerOffset + 1;
+                        const nextOffset = next > 5 ? -5 : next;
+                        setMarkerOffset(nextOffset);
+                        if (nearbyWindows.length) {
+                          // fast path: cycle locally through pre-fetched windows
+                          setMarkerFlash(true);
+                          setTimeout(() => setMarkerFlash(false), 800);
+                        } else {
+                          // always works — fetch the specific offset directly from the API
+                          fetchMarker(nCodons, true, nextOffset);
+                        }
+                      }}
+                      disabled={markerLoading}
+                      title="Cycle to next node window around c.5266dupC hotspot"
+                      className="flex items-center gap-1 text-xs text-slate-500 hover:text-amber-400 transition-colors disabled:opacity-40"
+                    >
+                      <RotateCcw className={`w-3 h-3 ${markerLoading ? 'animate-spin' : ''}`} />
+                      {markerLoading ? 'Fetching…' : `Refresh marker${markerOffset !== 0 ? ` (${markerOffset > 0 ? '+' : ''}${markerOffset})` : ''}`}
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="text-blue-400 shrink-0">🧬</span>
@@ -302,6 +327,8 @@ export default function GroverPOC() {
                     <div className={`flex items-center gap-2 flex-wrap transition-all duration-300 ${markerFlash ? 'ring-1 ring-amber-400/60 bg-amber-400/10 rounded px-1' : ''}`}>
                       {markerLoading && !markerInfo ? (
                         <span className="text-xs text-slate-500 italic animate-pulse">fetching marker…</span>
+                      ) : !markerInfo ? (
+                        <span className="text-xs text-amber-400/60 italic">↑ click "Fetch from NCBI" to load marker</span>
                       ) : (
                         <>
                           <span className="font-mono text-red-400 tracking-widest text-xs bg-red-950/40 px-2 py-0.5 rounded">
