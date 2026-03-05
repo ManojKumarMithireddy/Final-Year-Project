@@ -207,9 +207,12 @@ export default function GroverPOC() {
   const [ibmJobStatus, setIbmJobStatus] = useState('');
   const [ibmBackend, setIbmBackend]     = useState('');
   const ibmPollRef                      = useRef(null);
+  const ibmPollCountRef                 = useRef(0);
+  const IBM_MAX_POLLS                   = 50; // 50 × 8 s ≈ 7 min
 
   const stopPoll = useCallback(() => {
     if (ibmPollRef.current) { clearInterval(ibmPollRef.current); ibmPollRef.current = null; }
+    ibmPollCountRef.current = 0;
   }, []);
   useEffect(() => () => stopPoll(), [stopPoll]);
 
@@ -230,9 +233,18 @@ export default function GroverPOC() {
     } catch { toast.error('Failed to save. Are you logged in?'); }
   };
 
-  const pollIbmStatus = useCallback(async (jobId, markerBits) => {
+    const pollIbmStatus = useCallback(async (jobId, markerBits) => {
+    ibmPollCountRef.current += 1;
+    if (ibmPollCountRef.current > IBM_MAX_POLLS) {
+      stopPoll();
+      setIbmJobStatus('TIMEOUT');
+      toast.error('IBM QPU job timed out after 7 minutes. Check IBM Cloud console for job status.');
+      return;
+    }
     try {
       const res = await api.post('/search/quantum-poc/ibm-status', { job_id: jobId });
+      // Guard: component may have unmounted while request was in-flight
+      if (!ibmPollRef.current && res.data.status !== 'DONE') return;
       setIbmJobStatus(res.data.status);
       if (res.data.status === 'DONE') {
         stopPoll();
@@ -281,7 +293,7 @@ export default function GroverPOC() {
         setHealthyResult(r2.data);
         setActivePatient('carrier');
       } else {
-        const res = await api.post('/search/quantum-poc/bio-ibm-submit', { n_codons: 1, client_timestamp: new Date().toISOString() });
+        const res = await api.post('/search/quantum-poc/bio-ibm-submit', { n_codons: nCodons, client_timestamp: new Date().toISOString() });
         setIbmJobId(res.data.job_id);
         setIbmJobStatus(res.data.status);
         setIbmBackend(res.data.backend ?? '');
@@ -295,7 +307,7 @@ export default function GroverPOC() {
     setIsRunning(false);
   };
 
-  const ibmDone = ibmJobStatus === 'DONE' || ibmJobStatus === 'ERROR' || ibmJobStatus === 'CANCELLED';
+  const ibmDone = ibmJobStatus === 'DONE' || ibmJobStatus === 'ERROR' || ibmJobStatus === 'CANCELLED' || ibmJobStatus === 'TIMEOUT';
   const selectedResult = activePatient === 'carrier' ? carrierResult : healthyResult;
   const selectedStep   = activePatient === 'carrier' ? carrierStep   : healthyStep;
   const setSelectedStep = activePatient === 'carrier' ? setCarrierStep : setHealthyStep;
@@ -681,6 +693,17 @@ export default function GroverPOC() {
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
                 className="space-y-6 pt-6 border-t border-slate-800">
 
+                {/* Disclaimer: IBM path uses standard (unconstrained) Grover */}
+                <div className="bg-blue-950/30 border border-blue-700/30 rounded-xl px-4 py-2.5 text-xs text-blue-300/80 flex items-start gap-2">
+                  <span className="text-blue-400 mt-0.5 shrink-0">ℹ</span>
+                  <span>
+                    <strong className="text-blue-200">Standard Grover on hardware.</strong>{' '}
+                    Due to QPU gate-depth limits, the IBM path uses H⊗ⁿ initialisation — uniform over all
+                    2<sup>{ibmResult.n_qubits}</sup> states rather than the DNA-constrained |ψ₀⟩ used by the
+                    local simulator. The oracle still targets the correct BRCA1 marker.
+                  </span>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                   <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
                     <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Patient</div>
@@ -726,8 +749,13 @@ export default function GroverPOC() {
                 {ibmJobId && !ibmDone && !ibmResult.counts && (
                   <motion.div animate={{ opacity: [0.4,1,0.4] }} transition={{ duration: 1.5, repeat: Infinity }}
                     className="text-center py-4 text-slate-500 text-sm">
-                    ⏳ Waiting for IBM QPU — auto-checking every 8s
+                    ⏳ Waiting for IBM QPU — auto-checking every 8s (max ~7 min)
                   </motion.div>
+                )}
+                {ibmJobStatus === 'TIMEOUT' && (
+                  <div className="text-center py-4 text-amber-500/80 text-sm">
+                    ⏱ Job timed out. Check the <strong>IBM Cloud console</strong> for final status using job ID: <span className="font-mono text-xs">{ibmJobId}</span>
+                  </div>
                 )}
 
                 {ibmResult.detection_result && ibmResult.measured_state && (
