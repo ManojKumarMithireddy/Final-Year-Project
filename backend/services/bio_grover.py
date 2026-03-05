@@ -596,6 +596,10 @@ def build_bio_grover_ibm(
     N            = len(seen)
     target_found = target_bits in seen
 
-    k  = max(1, floor(pi / 4 * sqrt(N)))
+    # Cap k=1 for real QPU: optimal k=floor(π/4·√N) grows with N, but each
+    # Grover iteration doubles circuit depth (two 5-ctrl Toffolis). On noisy
+    # hardware, k>1 accumulates gate error faster than it amplifies the target.
+    # k=1 gives ~13.5% probability (vs 1.56% uniform) at minimal circuit depth.
+    k  = 1
     qc = _build_grover_circuit_standard(n, target_bits, k)
     return qc, k, N, n_max, target_found
