@@ -260,28 +260,37 @@ async def ibm_job_status(request: IBMStatusRequest, current_user: dict = Depends
             measured_state = max(counts, key=counts.get)
             total = sum(counts.values())
 
+            # Threshold-based detection: real QPU noise means the target state may not
+            # be the single maximum but should appear with well-above-uniform probability.
+            # For 6 qubits (64 states), uniform ≈ 1.56%; 5% ≈ 3.2× uniform.
+            IBM_DETECT_THRESHOLD = 0.05
+
             # Persist final result back into the history record (it was saved at
             # submit-time with detection_result=null). Look up by job_id to get
             # target_bits so we can compute detection and confidence server-side.
-            history_doc = await db.history.find_one({"job_id": request.job_id, "user_email": current_user["sub"]})
+            detection_result = None
+            confidence_val   = 0.0
+            history_doc = await db.history.find_one({"job_id": request.job_id, "email": current_user["sub"]})
             if history_doc:
-                target_bits     = history_doc.get("target_bits", "")
-                confidence      = counts.get(target_bits, 0) / total if total and target_bits else 0.0
-                detection_result = "FOUND" if measured_state == target_bits else "NOT_FOUND"
+                target_bits      = history_doc.get("target_bits", "")
+                confidence_val   = counts.get(target_bits, 0) / total if total and target_bits else 0.0
+                detection_result = "FOUND" if confidence_val >= IBM_DETECT_THRESHOLD else "NOT_FOUND"
                 await db.history.update_one(
-                    {"job_id": request.job_id, "user_email": current_user["sub"]},
+                    {"job_id": request.job_id, "email": current_user["sub"]},
                     {"$set": {
                         "measured_state":    measured_state,
                         "counts":            counts,
                         "detection_result":  detection_result,
-                        "confidence":        round(confidence, 4),
+                        "confidence":        round(confidence_val, 4),
                     }},
                 )
 
             return {
-                "status": status,
-                "counts": counts,
-                "measured_state": measured_state,
+                "status":           status,
+                "counts":           counts,
+                "measured_state":   measured_state,
+                "detection_result": detection_result,
+                "confidence":       round(confidence_val, 4) if history_doc else None,
                 "execution_time_ms": 0,
             }
         return {"status": status}

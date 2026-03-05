@@ -249,12 +249,16 @@ export default function GroverPOC() {
       if (res.data.status === 'DONE') {
         stopPoll();
         const total = Object.values(res.data.counts ?? {}).reduce((a, b) => a + b, 0);
+        const targetBits = markerBits ?? ibmResult?.marker_bits;
+        // Prefer backend-computed detection (threshold-based); fall back to threshold check from counts
+        const IBM_DETECT_THRESHOLD = 0.05;
+        const targetProb = total > 0 ? ((res.data.counts ?? {})[targetBits] ?? 0) / total : 0;
         setIbmResult((prev) => ({
           ...prev,
           measured_state:   res.data.measured_state,
           counts:           res.data.counts,
-          detection_result: res.data.measured_state === (markerBits ?? prev?.marker_bits) ? 'FOUND' : 'NOT_FOUND',
-          confidence:       total > 0 ? (res.data.counts[markerBits ?? prev?.marker_bits] ?? 0) / total : 0,
+          detection_result: res.data.detection_result ?? (targetProb >= IBM_DETECT_THRESHOLD ? 'FOUND' : 'NOT_FOUND'),
+          confidence:       res.data.confidence        ?? targetProb,
         }));
         toast.success('IBM QPU job complete!');
       } else if (res.data.status === 'ERROR' || res.data.status === 'CANCELLED') {
