@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   History as HistoryIcon,
   Activity,
@@ -66,13 +66,15 @@ const bioCacheKey = (target_bits, has_mutation) =>
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function History() {
-  const [rawItems,      setRawItems]      = useState([]);
-  const [displayGroups, setDisplayGroups] = useState([]);
-  const [loading,       setLoading]       = useState(true);
-  const [loadingMore,   setLoadingMore]   = useState(false);
-  const [hasMore,       setHasMore]       = useState(false);
-  const [skip,          setSkip]          = useState(0);
-  const [expandedId,    setExpandedId]    = useState(null);
+  const [rawItems,     setRawItems]    = useState([]);
+  const [loading,      setLoading]     = useState(true);
+  const [loadingMore,  setLoadingMore] = useState(false);
+  const [hasMore,      setHasMore]     = useState(false);
+  const [skip,         setSkip]        = useState(0);
+  const [expandedId,   setExpandedId]  = useState(null);
+
+  // displayGroups is derived from rawItems — avoids nested setState bugs
+  const displayGroups = useMemo(() => groupHistory(rawItems), [rawItems]);
 
   // Standard Grover circuit cache: keyed by target_bits
   const [circuitCache,    setCircuitCache]    = useState({});
@@ -93,12 +95,11 @@ export default function History() {
   const fetchPage = useCallback(async (skipVal) => {
     try {
       const res = await api.get(`/history?skip=${skipVal}&limit=20`);
-      const { items, has_more } = res.data;
-      setRawItems((prev) => {
-        const next = skipVal === 0 ? items : [...prev, ...items];
-        setDisplayGroups(groupHistory(next));
-        return next;
-      });
+      const data = res.data;
+      // Guard: backend may still be old (returns flat array) during rolling deploy
+      const items    = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+      const has_more = Array.isArray(data) ? false : Boolean(data?.has_more);
+      setRawItems((prev) => skipVal === 0 ? items : [...prev, ...items]);
       setHasMore(has_more);
       setSkip(skipVal + items.length);
     } catch (err) {
