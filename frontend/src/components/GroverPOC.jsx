@@ -24,6 +24,22 @@ function StepBadge({ n, label, done, optional }) {
   );
 }
 
+// ── Input / Output section divider ───────────────────────────────────────────
+function SectionLabel({ type, label }) {
+  const isInput = type === 'input';
+  return (
+    <div className={`flex items-center gap-3 ${isInput ? 'text-amber-400/70' : 'text-cyan-400/70'}`}>
+      <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest shrink-0 ${
+        isInput
+          ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+          : 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
+      }`}>{isInput ? '▶ INPUT' : '◀ OUTPUT'}</span>
+      <span className="text-xs font-bold uppercase tracking-widest">{label}</span>
+      <span className={`flex-1 h-px ${isInput ? 'bg-amber-500/15' : 'bg-cyan-500/15'}`} />
+    </div>
+  );
+}
+
 // ── Encoding helpers ──────────────────────────────────────────────────────────
 const DEC = { '00': 'A', '01': 'C', 10: 'G', 11: 'T' };
 const bitsToDna = (bits) => {
@@ -286,6 +302,7 @@ export default function GroverPOC() {
         </div>
 
         <div className="space-y-6">
+          <SectionLabel type="input" label="Your inputs" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
             {/* LEFT: NCBI sources + codon selector */}
@@ -352,6 +369,7 @@ export default function GroverPOC() {
                         <span className="text-xs text-amber-400/60 italic">↑ click "Fetch from NCBI" to load marker</span>
                       ) : (
                         <>
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest bg-cyan-500/10 border-cyan-500/30 text-cyan-400/80 shrink-0">◀ output</span>
                           <span className="font-mono text-red-400 tracking-widest text-xs bg-red-950/40 px-2 py-0.5 rounded">
                             {displayDna ?? '—'}
                           </span>
@@ -520,7 +538,8 @@ export default function GroverPOC() {
                 )}
 
                 {/* ── Per-patient cards with tables ──────────────────────────────── */}
-                <div className="text-xs text-slate-500 uppercase tracking-widest">
+                <SectionLabel type="output" label="Quantum search results" />
+                <div className="text-xs text-slate-500 -mt-3">
                   Same marker searched in two patients — click a card to view step detail
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
