@@ -164,7 +164,8 @@ export default function GroverPOC() {
   const [markerLoading, setMarkerLoading]     = useState(false);
   const [markerFetchedAt, setMarkerFetchedAt] = useState(null);
   const [markerFlash, setMarkerFlash]         = useState(false);
-  const [markerOffset, setMarkerOffset]       = useState(0);  // index into nearbyWindows (0 = centre)
+  // Pick a random starting window (-5..+5) so users see a different node each load
+  const [markerOffset, setMarkerOffset]       = useState(() => Math.floor(Math.random() * 11) - 5);
   const [nearbyWindows, setNearbyWindows]     = useState([]);  // pre-fetched from backend
 
   const fetchMarker = useCallback(async (codons, showToast = false, offset = 0) => {
@@ -184,11 +185,12 @@ export default function GroverPOC() {
     setMarkerLoading(false);
   }, []);
 
-  // Reset offset and fetch when codon count changes
+  // Pick a fresh random offset; fetch + display from that window
   useEffect(() => {
-    setMarkerOffset(0);
+    const off = Math.floor(Math.random() * 11) - 5;
+    setMarkerOffset(off);
     setNearbyWindows([]);
-    fetchMarker(nCodons, false);
+    fetchMarker(nCodons, false, off);
   }, [nCodons, fetchMarker]);
 
   // Derived: what the marker display should show right now
