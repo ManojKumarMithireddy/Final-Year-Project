@@ -307,9 +307,12 @@ async def bio_grover_local(
     patient_label = "Carrier (c.5266dupC present)" if request.has_mutation else "Healthy Control"
 
     # Build patient node table — scale with qubit capacity
-    # We use enough sequence to fill 2^n_qubits slots at most (preventing huge tables)
+    # We use enough sequence to fill 2^n_qubits slots at most (preventing huge tables).
+    # Exception: n_codons=1 has ≤4^3=64 unique 3-nt windows (the full 2^6 state space),
+    # so using the full sequence is safe and necessary — the 192-nt cap (64×3) would
+    # exclude INSERTION_POS=5266, making the carrier's mutation codon invisible.
     max_nodes    = min(1 << n_qubits, 4096)
-    use_len      = max_nodes * n_codons * 3
+    use_len      = len(patient_seq) if n_codons == 1 else max_nodes * n_codons * 3
     patient_used = patient_seq[:use_len]
     patient_nodes = build_patient_nodes(patient_used, n_codons)
 
@@ -417,7 +420,8 @@ async def bio_grover_ibm_submit(
     patient_seq      = apply_brca1_mutation(reference_seq)
     marker_seq_clean = get_marker_seq(patient_seq, n_codons)
     max_nodes         = min(1 << n_qubits, 512)   # smaller cap for QPU
-    patient_nodes     = build_patient_nodes(patient_seq[: max_nodes * n_codons * 3], n_codons)
+    use_len_ibm       = len(patient_seq) if n_codons == 1 else max_nodes * n_codons * 3
+    patient_nodes     = build_patient_nodes(patient_seq[:use_len_ibm], n_codons)
     target_bits       = encode_dna(marker_seq_clean)
 
     try:
@@ -491,7 +495,7 @@ async def bio_circuit_info(
 
     patient_seq = apply_brca1_mutation(reference_seq) if has_mutation else reference_seq
     max_nodes   = min(1 << n_qubits, 4096)
-    use_len     = max_nodes * n_codons * 3
+    use_len     = len(patient_seq) if n_codons == 1 else max_nodes * n_codons * 3
     patient_nodes = build_patient_nodes(patient_seq[:use_len], n_codons)
 
     if not patient_nodes:
