@@ -318,17 +318,6 @@ export default function GroverPOC() {
           </div>
         </div>
 
-        {/* Algorithm note */}
-        <div className="bg-amber-950/30 border border-amber-500/20 rounded-2xl p-4 mb-6 text-sm text-amber-200/70 leading-relaxed">
-          <span className="font-semibold text-amber-400">Why constrained? </span>
-          Standard Grover uses H⊗ⁿ — uniform over <em>all</em> 2ⁿ bit combinations, most of which
-          are biologically impossible. This PoC replaces H⊗ⁿ with a state preparation
-          <span className="font-mono bg-amber-900/30 px-1 mx-1 rounded">DNA|ψ₀⟩</span>
-          that loads only the real DNA nodes from the patient table. The diffusion operator
-          <span className="font-mono bg-amber-900/30 px-1 mx-1 rounded">2|ψ₀⟩⟨ψ₀|−I</span>
-          keeps all amplitude flow within that valid subset.
-        </div>
-
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
@@ -576,13 +565,6 @@ export default function GroverPOC() {
                     <p className="text-amber-300/80 text-xs">
                       → Increase to <strong>2 codons (12 qubits)</strong> or <strong>3 codons (18 qubits)</strong> for a marker specific enough to discriminate.
                     </p>
-                  </div>
-                )}
-
-                {/* Clean comparison confirmed */}
-                {!carrierResult.marker_in_reference && (
-                  <div className="bg-emerald-950/30 border border-emerald-700/30 rounded-xl px-4 py-2.5 text-xs text-emerald-400/80 flex items-center gap-2">
-                    ✓ Marker is unique in the reference — this is a valid diagnostic comparison
                   </div>
                 )}
 
