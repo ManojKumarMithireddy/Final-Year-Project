@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   History as HistoryIcon,
   Activity,
-  Server,
   Clock,
   ChevronDown,
   ChevronRight,
@@ -182,7 +181,7 @@ export default function History() {
 
     // Single item
     const item   = group.item;
-    const isBio  = item.type === 'bio_grover_local' || item.type === 'bio_grover_ibm_submit';
+    const isBio  = item.type === 'bio_grover_local';
     const bits   = item.target_bits;
 
     if (isBio && bits) {
@@ -547,17 +546,14 @@ export default function History() {
 
               // ── single item ──────────────────────────────────────────────
               const item   = group.item;
-              const isBio  = item.type === 'bio_grover_local' || item.type === 'bio_grover_ibm_submit';
-              const isIBM  = item.type === 'quantum_ibm_submit' || item.type === 'bio_grover_ibm_submit';
+              const isBio  = item.type === 'bio_grover_local';
               const bits   = item.target_bits;
               const circuit    = !isBio && bits ? circuitCache[bits] : null;
               const stepIdx    = getStep(id);
 
               const typeLabel = {
                 quantum_local_sim:     'Local Qiskit Simulator',
-                quantum_ibm_submit:    'IBM Cloud Execution',
                 bio_grover_local:      'BRCA1 Bio Simulation',
-                bio_grover_ibm_submit: 'BRCA1 IBM Execution',
               }[item.type] ?? item.type;
 
               return (
@@ -574,11 +570,10 @@ export default function History() {
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="flex items-center gap-4">
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                          isBio ? 'bg-emerald-500/20 text-emerald-400'
-                               : isIBM ? 'bg-blue-500/20 text-blue-400'
-                               : 'bg-amber-500/20 text-amber-400'
+                           isBio ? 'bg-emerald-500/20 text-emerald-400'
+                                : 'bg-amber-500/20 text-amber-400'
                         }`}>
-                          {isBio ? <Dna className="w-5 h-5" /> : isIBM ? <Server className="w-5 h-5" /> : <Activity className="w-5 h-5" />}
+                          {isBio ? <Dna className="w-5 h-5" /> : <Activity className="w-5 h-5" />}
                         </div>
                         <div>
                           <h4 className="text-white font-medium flex items-center gap-2">

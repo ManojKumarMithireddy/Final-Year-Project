@@ -1,6 +1,5 @@
 """
-Quantum router — Grover POC (local simulator) and IBM Cloud QPU
-submit / status endpoints.
+Quantum router — Grover POC (local simulator) endpoints.
 """
 
 import time
@@ -11,27 +10,18 @@ from fastapi import APIRouter, HTTPException, Depends
 from qiskit import transpile
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel, depolarizing_error
-from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
 from db import get_db
 from auth import get_current_user, get_optional_user
-from crypto import decrypt_value
-from models.schemas import QuantumToyRequest, IBMSubmitRequest, IBMStatusRequest, BioQuantumRequest, BioIBMSubmitRequest
+from models.schemas import QuantumToyRequest, BioQuantumRequest
 from services.grover import build_grover_circuit, build_grover_step_circuits
 from services.bio_grover import (
     fetch_patient_dna, apply_brca1_mutation, get_marker_seq,
-    build_patient_nodes, build_bio_grover_ibm, run_bio_grover_local,
+    build_patient_nodes, run_bio_grover_local,
     build_bio_step_circuits,
     encode_dna, decode_bits,
     MARKER_GENE_NAME, MARKER_VARIANT, MARKER_REGION_DESC, PATIENT_ACCESSION,
 )
-
-# IBM Cloud Imports (optional)
-try:
-    from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2 as Sampler
-    IBM_RUNTIME_AVAILABLE = True
-except ImportError:
-    IBM_RUNTIME_AVAILABLE = False
 
 router = APIRouter(prefix="/api/search", tags=["quantum"])
 
@@ -136,68 +126,6 @@ async def circuit_info(target_bits: str = "0000"):
     }
 
 
-@router.post("/quantum-poc/ibm-submit")
-async def ibm_submit_job(request: IBMSubmitRequest, current_user: dict = Depends(get_current_user)):
-    """
-    Submits a Grover search circuit to an IBM Cloud QPU.
-
-    SECURITY: IBM credentials (api_key, crn) are fetched server-side from the
-    authenticated user's saved credentials — they are NOT transmitted in the request body.
-    """
-    if not IBM_RUNTIME_AVAILABLE:
-        raise HTTPException(status_code=500, detail="qiskit-ibm-runtime not installed")
-
-    db = get_db()
-    creds = await db.credentials.find_one({"email": current_user["sub"]})
-    if not creds or not creds.get("ibm_api_key"):
-        raise HTTPException(
-            status_code=400,
-            detail="No IBM Cloud credentials saved. Please save your API key and CRN in the credentials panel first.",
-        )
-
-    try:
-        service = QiskitRuntimeService(
-            channel="ibm_cloud",
-            token=decrypt_value(creds["ibm_api_key"]),
-            instance=creds["ibm_crn"],
-        )
-        backend = service.least_busy(operational=True, simulator=False)
-
-        target_bitstring = request.target_bits
-        if not target_bitstring or not all(c in '01' for c in target_bitstring):
-            target_bitstring = "101"
-
-        qc, iterations = build_grover_circuit(target_bitstring)
-
-        pm = generate_preset_pass_manager(backend=backend, optimization_level=3)
-        isa_circuit = pm.run(qc)
-
-        sampler = Sampler(mode=backend)
-        job = sampler.run([isa_circuit])
-
-        job_data = {
-            "job_id": job.job_id(),
-            "backend": backend.name,
-            "circuit_diagram": str(qc.draw(output="text")),
-            "status": job.status(),
-            "iterations": iterations,
-            "execution_time_ms": 0,
-        }
-
-        await db.history.insert_one({
-            "email": current_user["sub"],
-            "type": "quantum_ibm_submit",
-            "target_bits": request.target_bits,
-            "job_id": job.job_id(),
-            "backend": backend.name,
-            "timestamp": _get_timestamp(request.client_timestamp),
-        })
-
-        return job_data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get("/quantum-poc/bio-marker")
 async def get_bio_marker(n_codons: int = 2, force: bool = False, offset: int = 0):
     """
@@ -229,73 +157,6 @@ async def get_bio_marker(n_codons: int = 2, force: bool = False, offset: int = 0
         "offset":            offset,
         "nearby_windows":    nearby_windows,
     }
-
-
-@router.post("/quantum-poc/ibm-status")
-async def ibm_job_status(request: IBMStatusRequest, current_user: dict = Depends(get_current_user)):
-    """
-    Checks the status of an IBM Cloud job.
-    IBM credentials are fetched server-side from the authenticated user's saved credentials.
-    """
-    if not IBM_RUNTIME_AVAILABLE:
-        raise HTTPException(status_code=500, detail="qiskit-ibm-runtime not installed")
-
-    db = get_db()
-    creds = await db.credentials.find_one({"email": current_user["sub"]})
-    if not creds or not creds.get("ibm_api_key"):
-        raise HTTPException(status_code=400, detail="No IBM Cloud credentials found. Please save your credentials first.")
-
-    try:
-        service = QiskitRuntimeService(
-            channel="ibm_cloud",
-            token=decrypt_value(creds["ibm_api_key"]),
-            instance=creds["ibm_crn"],
-        )
-        job = service.job(request.job_id)
-        status = job.status()
-
-        if status == "DONE":
-            result = job.result()
-            counts = result[0].data.meas.get_counts()
-            measured_state = max(counts, key=counts.get)
-            total = sum(counts.values())
-
-            # Threshold-based detection: real QPU noise means the target state may not
-            # be the single maximum but should appear with well-above-uniform probability.
-            # For 6 qubits (64 states), uniform ≈ 1.56%; 5% ≈ 3.2× uniform.
-            IBM_DETECT_THRESHOLD = 0.05
-
-            # Persist final result back into the history record (it was saved at
-            # submit-time with detection_result=null). Look up by job_id to get
-            # target_bits so we can compute detection and confidence server-side.
-            detection_result = None
-            confidence_val   = 0.0
-            history_doc = await db.history.find_one({"job_id": request.job_id, "email": current_user["sub"]})
-            if history_doc:
-                target_bits      = history_doc.get("target_bits", "")
-                confidence_val   = counts.get(target_bits, 0) / total if total and target_bits else 0.0
-                detection_result = "FOUND" if confidence_val >= IBM_DETECT_THRESHOLD else "NOT_FOUND"
-                await db.history.update_one(
-                    {"job_id": request.job_id, "email": current_user["sub"]},
-                    {"$set": {
-                        "measured_state":    measured_state,
-                        "counts":            counts,
-                        "detection_result":  detection_result,
-                        "confidence":        round(confidence_val, 4),
-                    }},
-                )
-
-            return {
-                "status":           status,
-                "counts":           counts,
-                "measured_state":   measured_state,
-                "detection_result": detection_result,
-                "confidence":       round(confidence_val, 4) if history_doc else None,
-                "execution_time_ms": 0,
-            }
-        return {"status": status}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +208,15 @@ async def bio_grover_local(
 
     if not patient_nodes:
         raise HTTPException(status_code=500, detail="Patient node table is empty after filtering.")
+
+    # Use custom marker if provided (frontend override), otherwise auto-compute from mutant sequence
+    if request.custom_marker_dna:
+        if len(request.custom_marker_dna) != n_codons * 3:
+            raise HTTPException(
+                status_code=422,
+                detail=f"custom_marker_dna must be {n_codons * 3} characters for n_codons={n_codons}.",
+            )
+        marker_seq_clean = request.custom_marker_dna
 
     target_bits = encode_dna(marker_seq_clean)
 
@@ -409,6 +279,7 @@ async def bio_grover_local(
             "patient_label":    patient_label,
             "marker_variant":   MARKER_VARIANT,
             "marker_dna":       marker_seq_clean,
+            "custom_marker_dna": request.custom_marker_dna or None,
             "detection_result": sim_result["detection_result"],
             "confidence":       sim_result["confidence"],
             "execution_time_ms": sim_result["execution_time_ms"],
@@ -416,86 +287,6 @@ async def bio_grover_local(
         })
 
     return response
-
-
-@router.post("/quantum-poc/bio-ibm-submit")
-async def bio_grover_ibm_submit(
-    request: BioIBMSubmitRequest,
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Submit a constrained BRCA1 Grover circuit to IBM Cloud QPU.
-    IBM credentials fetched server-side (same as toy PoC).
-    n_codons capped at 2 (12 qubits) to fit real QPU topology.
-    """
-    if not IBM_RUNTIME_AVAILABLE:
-        raise HTTPException(status_code=500, detail="qiskit-ibm-runtime not installed")
-
-    db    = get_db()
-    creds = await db.credentials.find_one({"email": current_user["sub"]})
-    if not creds or not creds.get("ibm_api_key"):
-        raise HTTPException(
-            status_code=400,
-            detail="No IBM Cloud credentials saved. Please save your API key and CRN first.",
-        )
-
-    n_codons = request.n_codons
-    n_qubits = n_codons * 6
-
-    # Fetch sequences — apply c.5266dupC mutation to simulate carrier patient
-    reference_seq = fetch_patient_dna()
-    if not reference_seq:
-        raise HTTPException(status_code=502, detail="Failed to fetch patient DNA from NCBI.")
-    patient_seq      = apply_brca1_mutation(reference_seq)
-    marker_seq_clean = get_marker_seq(patient_seq, n_codons)
-    max_nodes         = min(1 << n_qubits, 512)   # smaller cap for QPU
-    use_len_ibm       = len(patient_seq) if n_codons == 1 else max_nodes * n_codons * 3
-    patient_nodes     = build_patient_nodes(patient_seq[:use_len_ibm], n_codons)
-    target_bits       = encode_dna(marker_seq_clean)
-
-    try:
-        qc, k, n_unique, n_unconstrained, target_found = \
-            build_bio_grover_ibm(patient_nodes, target_bits)
-
-        service = QiskitRuntimeService(
-            channel="ibm_cloud",
-            token=decrypt_value(creds["ibm_api_key"]),
-            instance=creds["ibm_crn"],
-        )
-        backend    = service.least_busy(operational=True, simulator=False)
-        pm         = generate_preset_pass_manager(backend=backend, optimization_level=3)
-        isa_circuit = pm.run(qc)
-        sampler    = Sampler(mode=backend)
-        job        = sampler.run([isa_circuit])
-
-        await db.history.insert_one({
-            "email":          current_user["sub"],
-            "type":           "bio_grover_ibm_submit",
-            "target_bits":    target_bits,
-            "n_codons":       n_codons,
-            "n_qubits":       n_qubits,
-            "marker_variant": MARKER_VARIANT,
-            "marker_dna":     marker_seq_clean,
-            "job_id":         job.job_id(),
-            "backend":        backend.name,
-            "timestamp":      _get_timestamp(request.client_timestamp),
-        })
-
-        return {
-            "job_id":          job.job_id(),
-            "backend":         backend.name,
-            "status":          job.status(),
-            "iterations":      k,
-            "n_qubits":        n_qubits,
-            "n_unique":        n_unique,
-            "n_unconstrained": n_unconstrained,
-            "target_found":    target_found,
-            "marker_dna":      marker_seq_clean,
-            "marker_bits":     target_bits,
-            "circuit_diagram": str(qc.draw(output="text")),
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/quantum-poc/bio-circuit-info")

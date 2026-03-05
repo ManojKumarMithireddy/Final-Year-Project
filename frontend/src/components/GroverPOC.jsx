@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Cpu, Dna, Search, FlaskConical, RotateCcw } from 'lucide-react';
+import { Dna, FlaskConical, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import GroverStepNavigator from './GroverStepNavigator';
-import AmplitudeChart from './AmplitudeChart';
 
 // ── Encoding helpers ──────────────────────────────────────────────────────────
 const DEC = { '00': 'A', '01': 'C', 10: 'G', 11: 'T' };
@@ -13,13 +12,6 @@ const bitsToDna = (bits) => {
   for (let i = 0; i < bits.length; i += 2) s += DEC[bits.substring(i, i + 2)] ?? '?';
   return s;
 };
-const countsToProbabilities = (counts) => {
-  if (!counts) return null;
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  if (!total) return null;
-  return Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, v / total]));
-};
-
 // ── Mini detection badge (for comparison row) ─────────────────────────────────
 function MiniDetectionBadge({ result, confidence, label, active, onClick }) {
   const found = result === 'FOUND';
@@ -146,10 +138,6 @@ function NodeTable({ nodes, targetBits }) {
 // ── Main component ────────────────────────────────────────────────────────────
 export default function GroverPOC() {
   const [nCodons, setNCodons]           = useState(2);
-  const [backendType, setBackendType]   = useState('simulator');
-  const [ibmApiKey, setIbmApiKey]       = useState('');
-  const [ibmCrn, setIbmCrn]             = useState('');
-  const [credsSaved, setCredsSaved]     = useState(false);
   const [isRunning, setIsRunning]       = useState(false);
 
   // Simulator comparison state
@@ -184,10 +172,11 @@ export default function GroverPOC() {
     setMarkerLoading(false);
   }, []);
 
-  // Reset offset and fetch when codon count changes
+  // Reset offset, nearby windows, and custom marker when codon count changes
   useEffect(() => {
     setMarkerOffset(0);
     setNearbyWindows([]);
+    setCustomMarkerDna('');
     fetchMarker(nCodons, false, 0);
   }, [nCodons, fetchMarker]);
 
@@ -200,118 +189,48 @@ export default function GroverPOC() {
   const displayDna  = displayWindow?.dna  ?? markerInfo?.marker_dna  ?? null;
   const displayBits = displayWindow?.bits ?? markerInfo?.marker_bits ?? null;
 
-  // IBM state (unchanged)
-  const [ibmResult, setIbmResult]       = useState(null);
-  const [activeStep, setActiveStep]     = useState(0);
-  const [ibmJobId, setIbmJobId]         = useState('');
-  const [ibmJobStatus, setIbmJobStatus] = useState('');
-  const [ibmBackend, setIbmBackend]     = useState('');
-  const ibmPollRef                      = useRef(null);
-  const ibmPollCountRef                 = useRef(0);
-  const IBM_MAX_POLLS                   = 50; // 50 × 8 s ≈ 7 min
-
-  const stopPoll = useCallback(() => {
-    if (ibmPollRef.current) { clearInterval(ibmPollRef.current); ibmPollRef.current = null; }
-    ibmPollCountRef.current = 0;
-  }, []);
-  useEffect(() => () => stopPoll(), [stopPoll]);
+  // Custom marker state
+  const [useCustomMarker, setUseCustomMarker] = useState(false);
+  const [customMarkerDna, setCustomMarkerDna] = useState('');
 
   const nQubits   = nCodons * 6;
   const maxStates = Math.pow(2, nQubits);
 
-  useEffect(() => {
-    api.get('/credentials').then((r) => {
-      if (r.data.ibm_api_key) { setIbmApiKey(r.data.ibm_api_key); setIbmCrn(r.data.ibm_crn); setCredsSaved(true); }
-    }).catch(() => {});
-  }, []);
-
-  const handleSaveCredentials = async () => {
-    try {
-      await api.post('/credentials', { api_key: ibmApiKey, crn: ibmCrn });
-      setCredsSaved(true);
-      toast.success('IBM credentials saved.');
-    } catch { toast.error('Failed to save. Are you logged in?'); }
-  };
-
-    const pollIbmStatus = useCallback(async (jobId, markerBits) => {
-    ibmPollCountRef.current += 1;
-    if (ibmPollCountRef.current > IBM_MAX_POLLS) {
-      stopPoll();
-      setIbmJobStatus('TIMEOUT');
-      toast.error('IBM QPU job timed out after 7 minutes. Check IBM Cloud console for job status.');
-      return;
-    }
-    try {
-      const res = await api.post('/search/quantum-poc/ibm-status', { job_id: jobId });
-      // Guard: component may have unmounted while request was in-flight
-      if (!ibmPollRef.current && res.data.status !== 'DONE') return;
-      setIbmJobStatus(res.data.status);
-      if (res.data.status === 'DONE') {
-        stopPoll();
-        const total = Object.values(res.data.counts ?? {}).reduce((a, b) => a + b, 0);
-        const targetBits = markerBits ?? ibmResult?.marker_bits;
-        // Prefer backend-computed detection (threshold-based); fall back to threshold check from counts
-        const IBM_DETECT_THRESHOLD = 0.05;
-        const targetProb = total > 0 ? ((res.data.counts ?? {})[targetBits] ?? 0) / total : 0;
-        setIbmResult((prev) => ({
-          ...prev,
-          measured_state:   res.data.measured_state,
-          counts:           res.data.counts,
-          detection_result: res.data.detection_result ?? (targetProb >= IBM_DETECT_THRESHOLD ? 'FOUND' : 'NOT_FOUND'),
-          confidence:       res.data.confidence        ?? targetProb,
-        }));
-        toast.success('IBM QPU job complete!');
-      } else if (res.data.status === 'ERROR' || res.data.status === 'CANCELLED') {
-        stopPoll();
-        toast.error(`IBM job ${res.data.status.toLowerCase()}.`);
-      }
-    } catch { toast.error('Error checking IBM job status.'); }
-  }, [stopPoll]);
+  // Derived: custom marker validation
+  const customMarkerLen   = nCodons * 3;
+  const customMarkerValid = useCustomMarker
+    && customMarkerDna.length === customMarkerLen
+    && /^[AGCT]+$/i.test(customMarkerDna);
 
   const handleRun = async () => {
-    if (backendType === 'ibm_cloud' && !credsSaved) {
-      toast.error('Please save your IBM credentials first.'); return;
+    if (useCustomMarker && customMarkerDna.length > 0 && !customMarkerValid) {
+      toast.error(`Custom marker must be exactly ${customMarkerLen} AGCT characters.`); return;
     }
     setIsRunning(true);
     setCarrierResult(null);
     setHealthyResult(null);
-    setIbmResult(null);
-    setActiveStep(0);
     setCarrierStep(0);
     setHealthyStep(0);
-    setIbmJobId('');
-    setIbmJobStatus('');
-    setIbmBackend('');
-    stopPoll();
 
     try {
-      if (backendType === 'simulator') {
-        // Fire both patient scenarios in parallel; share run_id so history groups them
-        const ts = new Date().toISOString();
-        const runId = crypto.randomUUID();
-        const [r1, r2] = await Promise.all([
-          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true,  marker_offset: markerOffset, client_timestamp: ts, run_id: runId }),
-          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false, marker_offset: markerOffset, client_timestamp: ts, run_id: runId }),
-        ]);
-        setCarrierResult(r1.data);
-        setHealthyResult(r2.data);
-        setActivePatient('carrier');
-      } else {
-        const res = await api.post('/search/quantum-poc/bio-ibm-submit', { n_codons: 1, client_timestamp: new Date().toISOString() });
-        setIbmJobId(res.data.job_id);
-        setIbmJobStatus(res.data.status);
-        setIbmBackend(res.data.backend ?? '');
-        setIbmResult({ ...res.data, measured_state: null, counts: null, detection_result: null, confidence: 0 });
-        ibmPollRef.current = setInterval(() => pollIbmStatus(res.data.job_id, res.data.marker_bits), 8000);
-      }
+      // Fire both patient scenarios in parallel; share run_id so history groups them
+      const ts = new Date().toISOString();
+      const runId = crypto.randomUUID();
+      const extra = (useCustomMarker && customMarkerValid)
+        ? { custom_marker_dna: customMarkerDna.toUpperCase() }
+        : {};
+      const [r1, r2] = await Promise.all([
+        api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true,  marker_offset: markerOffset, client_timestamp: ts, run_id: runId, ...extra }),
+        api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false, marker_offset: markerOffset, client_timestamp: ts, run_id: runId, ...extra }),
+      ]);
+      setCarrierResult(r1.data);
+      setHealthyResult(r2.data);
+      setActivePatient('carrier');
     } catch (err) {
-      stopPoll();
       toast.error(err.response?.data?.detail ?? 'Quantum execution failed.');
     }
     setIsRunning(false);
   };
-
-  const ibmDone = ibmJobStatus === 'DONE' || ibmJobStatus === 'ERROR' || ibmJobStatus === 'CANCELLED' || ibmJobStatus === 'TIMEOUT';
   const selectedResult = activePatient === 'carrier' ? carrierResult : healthyResult;
   const selectedStep   = activePatient === 'carrier' ? carrierStep   : healthyStep;
   const setSelectedStep = activePatient === 'carrier' ? setCarrierStep : setHealthyStep;
@@ -403,8 +322,7 @@ export default function GroverPOC() {
                     </div>
                   </div>
                 </div>
-                {backendType === 'simulator' && (
-                  <div className="pt-1 border-t border-slate-800 text-xs text-slate-500 space-y-1">
+                <div className="pt-1 border-t border-slate-800 text-xs text-slate-500 space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
                       Patient A: NM_007294.4 + c.5266dupC insertion (carrier)
@@ -414,12 +332,10 @@ export default function GroverPOC() {
                       Patient B: NM_007294.4 reference only (healthy)
                     </div>
                   </div>
-                )}
               </div>
 
-              {/* Codon selector — hidden for IBM (locked to 1) */}
-              {backendType === 'simulator' && (
-                <div>
+              {/* Codon selector */}
+              <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">
                     Codons per node
                     <span className="ml-2 text-slate-500 font-normal text-xs">(sets qubit count + data volume)</span>
@@ -444,116 +360,64 @@ export default function GroverPOC() {
                     <span className="text-amber-400">constrained to actual DNA nodes</span>
                   </div>
                 </div>
-              )}
             </div>
 
-            {/* RIGHT: Backend + credentials */}
+            {/* RIGHT: Custom marker + run */}
             <div className="space-y-5">
+
+              {/* Custom marker input */}
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Execution Backend</label>
-                <select value={backendType} onChange={(e) => setBackendType(e.target.value)}
-                  className="w-full bg-slate-950/50 border border-slate-800 rounded-xl px-4 py-3 text-sm outline-none">
-                  <option value="simulator">Local Qiskit Simulator (Aer)</option>
-                  <option value="ibm_cloud">IBM Cloud QPU (real hardware)</option>
-                </select>
-                {backendType === 'ibm_cloud' && (
-                  <p className="text-xs text-blue-400/80 mt-1.5">
-                    IBM free tier: fixed at 6 qubits (1 codon) for QPU compatibility.
-                  </p>
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-300 mb-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={useCustomMarker}
+                    onChange={(e) => { setUseCustomMarker(e.target.checked); if (!e.target.checked) setCustomMarkerDna(''); }}
+                    className="w-4 h-4 accent-amber-500"
+                  />
+                  Custom marker (AGCT)
+                  <span className="text-slate-500 font-normal text-xs">— optional, overrides auto-computed</span>
+                </label>
+                {useCustomMarker && (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={customMarkerDna}
+                      onChange={(e) => setCustomMarkerDna(e.target.value.toUpperCase().replace(/[^AGCT]/g, ''))}
+                      maxLength={customMarkerLen}
+                      placeholder={`${customMarkerLen} nucleotides (A/G/C/T)`}
+                      spellCheck={false}
+                      className="w-full bg-slate-950/60 border border-slate-700 rounded-xl px-4 py-2.5 font-mono text-sm text-emerald-300 uppercase outline-none focus:border-amber-500/60 transition-colors"
+                    />
+                    <div className={`text-xs flex items-center gap-2 ${
+                      customMarkerDna.length === 0 ? 'text-slate-500'
+                        : customMarkerValid ? 'text-emerald-400' : 'text-red-400'
+                    }`}>
+                      <span>{customMarkerDna.length}/{customMarkerLen} nt</span>
+                      {customMarkerDna.length > 0 && (
+                        customMarkerValid
+                          ? <span>✓ valid — will use as Grover search target</span>
+                          : <span>need exactly {customMarkerLen} characters</span>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
 
-              <AnimatePresence>
-                {backendType === 'ibm_cloud' && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="bg-blue-900/10 border border-blue-500/20 p-4 rounded-2xl space-y-3">
-                    <div className="text-xs text-blue-300/70">
-                      {credsSaved ? '✅ IBM credentials loaded. API key stays server-side.'
-                        : '⚠ No IBM credentials saved — enter below.'}
-                    </div>
-                    <div>
-                      <label className="block text-xs text-blue-200/60 mb-1">IAM API Key</label>
-                      <input type="password" value={ibmApiKey} onChange={(e) => setIbmApiKey(e.target.value)}
-                        className="w-full bg-slate-900 border border-blue-500/30 rounded-lg px-3 py-2 text-sm outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-blue-200/60 mb-1">Instance CRN</label>
-                      <input type="text" value={ibmCrn} onChange={(e) => setIbmCrn(e.target.value)}
-                        className="w-full bg-slate-900 border border-blue-500/30 rounded-lg px-3 py-2 text-sm outline-none" />
-                    </div>
-                    <button onClick={handleSaveCredentials} disabled={!ibmApiKey || !ibmCrn}
-                      className="w-full flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm py-2 rounded-lg transition-colors">
-                      <Save className="w-4 h-4" /> Save Credentials
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
               {/* Run button */}
               <button onClick={handleRun}
-                disabled={isRunning || (backendType === 'ibm_cloud' && !credsSaved)}
+                disabled={isRunning || (useCustomMarker && customMarkerDna.length > 0 && !customMarkerValid)}
                 className="w-full bg-gradient-to-r from-red-700 to-rose-600 hover:from-red-600 hover:to-rose-500 text-white py-4 text-base rounded-xl font-bold transition-all disabled:opacity-50 shadow-lg shadow-red-900/30 flex items-center justify-center gap-3">
                 {isRunning
                   ? <><span className="animate-spin inline-block">⚙</span> Running search…</>
-                  : backendType === 'simulator'
-                    ? <><FlaskConical className="w-5 h-5" /> Compare Both Patients
-                        <span className="text-sm font-normal opacity-70">({nQubits} qubits each)</span>
-                      </>
-                    : <><Search className="w-5 h-5" /> Run BRCA1 Detection
-                        <span className="text-sm font-normal opacity-70">(6 qubits)</span>
-                      </>
+                  : <><FlaskConical className="w-5 h-5" /> Compare Both Patients
+                      <span className="text-sm font-normal opacity-70">({nQubits} qubits each)</span>
+                    </>
                 }
               </button>
             </div>
           </div>
 
-          {/* IBM job status */}
-          <AnimatePresence>
-            {ibmJobId && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="bg-slate-950/80 border border-blue-900/50 p-4 rounded-2xl">
-                <div className="flex items-start justify-between gap-4 flex-wrap">
-                  <div className="space-y-1.5">
-                    {ibmBackend && (
-                      <div className="flex items-center gap-2 text-sm">
-                        <Cpu className="w-4 h-4 text-blue-400" />
-                        <span className="text-slate-400">Backend:</span>
-                        <span className="font-mono text-blue-300">{ibmBackend}</span>
-                      </div>
-                    )}
-                    <div className="text-sm text-slate-400">
-                      Job: <span className="font-mono text-slate-300 text-xs break-all ml-1">{ibmJobId}</span>
-                    </div>
-                    <div className="text-sm flex items-center gap-2">
-                      <span className="text-slate-400">Status:</span>
-                      <span className={`font-semibold ${
-                        ibmJobStatus === 'DONE' ? 'text-emerald-400'
-                          : ibmJobStatus === 'ERROR' || ibmJobStatus === 'CANCELLED' ? 'text-red-400'
-                          : 'text-amber-400'}`}>{ibmJobStatus}</span>
-                      {!ibmDone && (
-                        <span className="flex gap-1">
-                          {[0,1,2].map((i) => (
-                            <motion.span key={i} className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"
-                              animate={{ opacity: [0.3,1,0.3] }}
-                              transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }} />
-                          ))}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {!ibmDone && (
-                    <button onClick={() => pollIbmStatus(ibmJobId, ibmResult?.marker_bits)}
-                      className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm border border-slate-700 shrink-0">
-                      Refresh
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* ── SIMULATOR: Comparison Results ─────────────────────────────────── */}
+          {/* ── Comparison Results ─────────────────────────────────── */}
           <AnimatePresence>
             {comparisonReady && (
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
@@ -575,11 +439,14 @@ export default function GroverPOC() {
                     </div>
                     <p className="text-amber-200/70 text-xs leading-relaxed">
                       With only {nCodons * 3} nucleotides, there are only 4<sup>{nCodons * 3}</sup> = {Math.pow(4, nCodons * 3).toLocaleString()} possible sequences.
-                      The BRCA1 reference (~7 kb) has enough nodes that this specific pattern coincidentally appears in the healthy sequence too — so Grover detects it in both patients.
+                      The BRCA1 reference (~7 kb) has enough nodes that this specific {nCodons * 3}-nt pattern coincidentally appears in the healthy sequence too — so Grover detects it in both patients.
                       This is a real challenge in molecular diagnostics: <strong className="text-amber-300">markers must be long enough to be unique</strong>.
                     </p>
                     <p className="text-amber-300/80 text-xs">
-                      → Increase to <strong>2 codons (12 qubits)</strong> or <strong>3 codons (18 qubits)</strong> for a marker specific enough to discriminate.
+                      {useCustomMarker
+                        ? '→ Try a different custom marker sequence, or increase the codon count.'
+                        : <><strong>→ Increase to 2 codons (12 qubits)</strong> or <strong>3 codons (18 qubits)</strong> for a marker specific enough to discriminate.</>
+                      }
                     </p>
                   </div>
                 )}
@@ -685,99 +552,6 @@ export default function GroverPOC() {
                     onStepChange={setSelectedStep}
                     targetBits={selectedResult.marker_bits}
                   />
-                )}
-
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* ── IBM: Single Result ────────────────────────────────────────────── */}
-          <AnimatePresence>
-            {ibmResult && (
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-                className="space-y-6 pt-6 border-t border-slate-800">
-
-                {/* Disclaimer: IBM path uses standard (unconstrained) Grover */}
-                <div className="bg-blue-950/30 border border-blue-700/30 rounded-xl px-4 py-2.5 text-xs text-blue-300/80 flex items-start gap-2">
-                  <span className="text-blue-400 mt-0.5 shrink-0">ℹ</span>
-                  <span>
-                    <strong className="text-blue-200">Standard Grover on hardware.</strong>{' '}
-                    Due to QPU gate-depth limits, the IBM path uses H⊗ⁿ initialisation — uniform over all
-                    2<sup>{ibmResult.n_qubits}</sup> states rather than the DNA-constrained |ψ₀⟩ used by the
-                    local simulator. The oracle still targets the correct BRCA1 marker.
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Patient</div>
-                    <div className="font-mono text-blue-300 text-xs">{ibmResult.patient_accession}</div>
-                    <div className="text-slate-500 text-xs mt-0.5">{ibmResult.total_nodes} nodes · {ibmResult.n_qubits} qubits</div>
-                  </div>
-                  <div className="bg-red-950/30 border border-red-800/40 rounded-xl p-4">
-                    <div className="text-xs text-red-400 uppercase tracking-wider mb-1">Disease Marker</div>
-                    <div className="font-mono text-red-300 tracking-widest text-xs">{ibmResult.marker_dna}</div>
-                    <div className="font-mono text-slate-400 text-xs">{ibmResult.marker_bits}</div>
-                  </div>
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Search Space</div>
-                    <div className="font-mono text-amber-400 font-bold">{ibmResult.n_unique}</div>
-                    <div className="text-slate-500 text-xs">of {ibmResult.n_unconstrained} states · {ibmResult.iterations} iterations</div>
-                  </div>
-                </div>
-
-                {ibmResult.counts && (
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-5">
-                    <div className="text-xs font-medium text-slate-400 uppercase tracking-widest mb-3">
-                      QPU Measurement Distribution
-                    </div>
-                    <AmplitudeChart
-                      probabilities={countsToProbabilities(ibmResult.counts)}
-                      targetBits={ibmResult.marker_bits}
-                      stepIndex={3}
-                    />
-                  </div>
-                )}
-
-                {ibmResult.circuit_diagram && (
-                  <div className="border border-slate-800 rounded-xl overflow-hidden">
-                    <div className="px-4 py-2.5 bg-slate-900/80 border-b border-slate-800 text-xs font-medium text-slate-400 uppercase tracking-widest">
-                      Transpiled Circuit
-                    </div>
-                    <div className="p-5 overflow-x-auto">
-                      <pre className="text-[10px] text-amber-500/70 leading-tight">{ibmResult.circuit_diagram}</pre>
-                    </div>
-                  </div>
-                )}
-
-                {ibmJobId && !ibmDone && !ibmResult.counts && (
-                  <motion.div animate={{ opacity: [0.4,1,0.4] }} transition={{ duration: 1.5, repeat: Infinity }}
-                    className="text-center py-4 text-slate-500 text-sm">
-                    ⏳ Waiting for IBM QPU — auto-checking every 8s (max ~7 min)
-                  </motion.div>
-                )}
-                {ibmJobStatus === 'TIMEOUT' && (
-                  <div className="text-center py-4 text-amber-500/80 text-sm">
-                    ⏱ Job timed out. Check the <strong>IBM Cloud console</strong> for final status using job ID: <span className="font-mono text-xs">{ibmJobId}</span>
-                  </div>
-                )}
-
-                {ibmResult.detection_result && ibmResult.measured_state && (
-                  <motion.div
-                    initial={{ scale: 0.85, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className={`rounded-2xl border p-6 text-center ${
-                      ibmResult.detection_result === 'FOUND'
-                        ? 'bg-red-900/30 border-red-500/50'
-                        : 'bg-emerald-900/20 border-emerald-500/40'
-                    }`}>
-                    <div className={`text-3xl font-bold mb-1 ${ibmResult.detection_result === 'FOUND' ? 'text-red-400' : 'text-emerald-400'}`}>
-                      {ibmResult.detection_result === 'FOUND' ? '🧬 BRCA1 DETECTED' : '✅ NOT FOUND'}
-                    </div>
-                    <div className="mt-2 text-xs text-slate-400">
-                      Confidence: <span className="font-mono text-white">{(ibmResult.confidence * 100).toFixed(1)}%</span>
-                    </div>
-                  </motion.div>
                 )}
 
               </motion.div>

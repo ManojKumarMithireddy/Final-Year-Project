@@ -75,20 +75,12 @@ class QuantumToyRequest(BaseModel):
     client_timestamp: Optional[str] = Field(default=None,
         description="ISO 8601 timestamp from the browser — stored in history if provided.")
 
-class IBMSubmitRequest(BaseModel):
-    """IBM credentials are fetched server-side from the authenticated user's saved credentials."""
-    target_bits: str
-    client_timestamp: Optional[str] = None
-
-class IBMStatusRequest(BaseModel):
-    """IBM credentials are fetched server-side from the authenticated user's saved credentials."""
-    job_id: str
-
 class BioQuantumRequest(BaseModel):
     """
     Request for the constrained BRCA1 Grover search PoC.
     n_codons controls both the NCBI fetch volume and the qubit count (n_qubits = n_codons * 6).
     has_mutation: True = carrier (c.5266dupC present); False = healthy control (no mutation).
+    custom_marker_dna: Optional AGCT sequence that overrides the auto-computed c.5266dupC marker.
     """
     n_codons: int = Field(default=1, ge=1, le=3,
         description="Number of codons per node (1=6 qubits, 2=12 qubits, 3=18 qubits).")
@@ -99,10 +91,15 @@ class BioQuantumRequest(BaseModel):
     run_id: Optional[str] = Field(default=None, max_length=64,
         description="Client-generated UUID linking the two parallel patient requests to one history group.")
     client_timestamp: Optional[str] = None
+    custom_marker_dna: Optional[str] = Field(default=None, max_length=9,
+        description="Optional custom AGCT marker (length must equal n_codons * 3). Overrides the auto-computed marker.")
 
-class BioIBMSubmitRequest(BaseModel):
-    """IBM QPU variant — locked to 1 codon (6 qubits). Real QPU noise makes
-    multi-codon circuits (12/18 qubits) unreliable; 6 qubits is the practical max."""
-    n_codons: int = Field(default=1, ge=1, le=1,
-        description="Fixed at 1 codon (6 qubits) — IBM QPU free-tier practical maximum.")
-    client_timestamp: Optional[str] = None
+    @field_validator("custom_marker_dna")
+    @classmethod
+    def validate_custom_marker_dna(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.upper()
+        if not all(c in "AGCT" for c in v):
+            raise ValueError("custom_marker_dna must contain only A, G, C, T characters.")
+        return v

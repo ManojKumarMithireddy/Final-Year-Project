@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 from routers.auth import router as auth_router
 from routers.search import router as search_router
 from routers.quantum import router as quantum_router
-from routers.credentials import router as credentials_router
 from routers.user import router as user_router
 
 
@@ -98,7 +97,6 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(search_router)
 app.include_router(quantum_router)
-app.include_router(credentials_router)
 app.include_router(user_router)
 
 
