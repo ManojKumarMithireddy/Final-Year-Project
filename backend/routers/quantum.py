@@ -139,12 +139,19 @@ async def get_bio_marker(n_codons: int = 2, force: bool = False, offset: int = 0
     mutant_seq  = apply_brca1_mutation(reference_seq)
     marker_seq  = get_marker_seq(mutant_seq, n_codons, offset=offset)
     target_bits = encode_dna(marker_seq)
-    # Pre-compute windows -5..+5 so the frontend can cycle without extra API calls
-    nearby_windows = [
-        {"offset": o, "dna": get_marker_seq(mutant_seq, n_codons, offset=o),
-         "bits": encode_dna(get_marker_seq(mutant_seq, n_codons, offset=o))}
-        for o in range(-5, 6)
-    ]
+    # Pre-compute windows -5..+5; flag windows whose bits appear in the healthy reference
+    # (in_reference=True → non-specific marker, found in both patients → false positive).
+    ref_bits = {nd["bits"] for nd in build_patient_nodes(reference_seq, n_codons)}
+    nearby_windows = []
+    for o in range(-5, 6):
+        wdna  = get_marker_seq(mutant_seq, n_codons, offset=o)
+        wbits = encode_dna(wdna)
+        nearby_windows.append({
+            "offset":       o,
+            "dna":          wdna,
+            "bits":         wbits,
+            "in_reference": wbits in ref_bits,
+        })
     return {
         "marker_dna":        marker_seq,
         "marker_bits":       target_bits,

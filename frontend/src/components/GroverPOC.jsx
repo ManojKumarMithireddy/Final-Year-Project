@@ -290,8 +290,25 @@ export default function GroverPOC() {
   const displayDna  = displayWindow?.dna  ?? markerInfo?.marker_dna  ?? null;
   const displayBits = displayWindow?.bits ?? markerInfo?.marker_bits ?? null;
 
-  // Custom marker selection — chosen from NCBI nearby_windows dropdown; '' = auto (hotspot)
-  // Marker selection is handled via markerOffset — no separate customMarkerDna state needed.
+  // Specific windows: exclude windows whose DNA appears in the healthy reference sequence
+  // (those produce false positives — Grover finds them in both patients).
+  const specificWindows = nearbyWindows.filter(w => !w.in_reference);
+
+  // Auto-correct markerOffset when nearbyWindows loads and the selected window is non-specific.
+  useEffect(() => {
+    if (!nearbyWindows.length) return;
+    const current = nearbyWindows.find(w => w.offset === markerOffset);
+    if (current?.in_reference) {
+      const specific = nearbyWindows.filter(w => !w.in_reference);
+      if (specific.length) {
+        setMarkerOffset(
+          specific.reduce((best, w) =>
+            Math.abs(w.offset) < Math.abs(best.offset) ? w : best
+          ).offset
+        );
+      }
+    }
+  }, [nearbyWindows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const nQubits   = nCodons * 6;
   const maxStates = Math.pow(2, nQubits);
@@ -398,15 +415,13 @@ export default function GroverPOC() {
               ) : (
                 <button
                   onClick={() => {
-                    const next = markerOffset + 1;
-                    const nextOffset = next > 5 ? -5 : next;
-                    setMarkerOffset(nextOffset);
-                    if (nearbyWindows.length) {
-                      setMarkerFlash(true);
-                      setTimeout(() => setMarkerFlash(false), 800);
-                    } else {
-                      fetchMarker(nCodons, true, nextOffset);
-                    }
+                    const offsets = specificWindows.map(w => w.offset);
+                    if (!offsets.length) return;
+                    const idx = offsets.indexOf(markerOffset);
+                    const next = offsets[(idx + 1) % offsets.length];
+                    setMarkerOffset(next);
+                    setMarkerFlash(true);
+                    setTimeout(() => setMarkerFlash(false), 800);
                   }}
                   disabled={markerLoading}
                   title="Cycle to next node window around c.5266dupC hotspot"
@@ -473,10 +488,10 @@ export default function GroverPOC() {
           <select
             value={String(markerOffset)}
             onChange={(e) => setMarkerOffset(parseInt(e.target.value, 10))}
-            disabled={nearbyWindows.length === 0}
+            disabled={specificWindows.length === 0}
             className="w-full bg-slate-950/60 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-200 outline-none focus:border-amber-500/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {nearbyWindows.map((w) => (
+            {specificWindows.map((w) => (
               <option key={w.offset} value={String(w.offset)}>
                 {w.offset === 0 ? '★ hotspot (recommended)' : w.offset > 0 ? `node +${w.offset}` : `node ${w.offset}`}
                 {' · '}{w.dna}{' · '}{w.bits}
@@ -485,6 +500,8 @@ export default function GroverPOC() {
           </select>
           {nearbyWindows.length === 0 ? (
             <p className="mt-1.5 text-[11px] text-slate-600 italic">Complete step 2 (Fetch from NCBI) to load options.</p>
+          ) : specificWindows.length === 0 ? (
+            <p className="mt-1.5 text-[11px] text-amber-600/80 italic">⚠ All windows appear in the healthy reference — try increasing codons (step 1).</p>
           ) : markerOffset !== 0 ? (
             <div className="mt-1.5 flex items-center gap-2 text-xs text-emerald-400">
               <span>✓</span>
