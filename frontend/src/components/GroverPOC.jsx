@@ -5,6 +5,25 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import GroverStepNavigator from './GroverStepNavigator';
 
+// ── Step badge ────────────────────────────────────────────────────────────────
+function StepBadge({ n, label, done, optional }) {
+  return (
+    <div className={`flex items-center gap-2 mb-2 ${optional ? 'opacity-70' : ''}`}>
+      <span className={`flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold shrink-0 ${
+        done
+          ? 'bg-emerald-500/30 border border-emerald-500/60 text-emerald-300'
+          : 'bg-amber-500/20 border border-amber-500/50 text-amber-300'
+      }`}>{done ? '✓' : n}</span>
+      <span className={`text-xs font-semibold uppercase tracking-wider ${done ? 'text-emerald-400/70' : 'text-amber-300/80'}`}>
+        {label}
+      </span>
+      <span className="text-[10px] text-slate-600 uppercase tracking-widest ml-auto">
+        {optional ? 'optional · ' : ''}👆 user input
+      </span>
+    </div>
+  );
+}
+
 // ── Encoding helpers ──────────────────────────────────────────────────────────
 const DEC = { '00': 'A', '01': 'C', 10: 'G', 11: 'T' };
 const bitsToDna = (bits) => {
@@ -271,6 +290,8 @@ export default function GroverPOC() {
 
             {/* LEFT: NCBI sources + codon selector */}
             <div className="space-y-5">
+              {/* Step 2: Fetch from NCBI */}
+              <StepBadge n={2} label="Fetch NCBI marker" done={!!markerInfo} />
               <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3 text-sm">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-medium text-slate-400 uppercase tracking-widest">NCBI Data Sources</div>
@@ -361,8 +382,9 @@ export default function GroverPOC() {
                   </div>
               </div>
 
-              {/* Codon selector */}
+              {/* Codon selector — Step 1 */}
               <div>
+                  <StepBadge n={1} label="Choose codon size" done={true} />
                   <label className="block text-sm font-medium text-slate-300 mb-2">
                     Codons per node
                     <span className="ml-2 text-slate-500 font-normal text-xs">(sets qubit count + data volume)</span>
@@ -392,8 +414,9 @@ export default function GroverPOC() {
             {/* RIGHT: Custom marker + run */}
             <div className="space-y-5">
 
-              {/* Custom marker input */}
+              {/* Custom marker input — Step 3 (optional) */}
               <div>
+                <StepBadge n={3} label="Custom marker" done={customMarkerValid} optional />
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-300 mb-3 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -430,17 +453,20 @@ export default function GroverPOC() {
                 )}
               </div>
 
-              {/* Run button */}
-              <button onClick={handleRun}
-                disabled={isRunning || (useCustomMarker && customMarkerDna.length > 0 && !customMarkerValid)}
-                className="w-full bg-gradient-to-r from-red-700 to-rose-600 hover:from-red-600 hover:to-rose-500 text-white py-4 text-base rounded-xl font-bold transition-all disabled:opacity-50 shadow-lg shadow-red-900/30 flex items-center justify-center gap-3">
-                {isRunning
-                  ? <><span className="animate-spin inline-block">⚙</span> Running search…</>
-                  : <><FlaskConical className="w-5 h-5" /> Compare Both Patients
-                      <span className="text-sm font-normal opacity-70">({nQubits} qubits each)</span>
-                    </>
-                }
-              </button>
+              {/* Run button — Step 4 */}
+              <div>
+                <StepBadge n={4} label="Run quantum search" done={comparisonReady} />
+                <button onClick={handleRun}
+                  disabled={isRunning || (useCustomMarker && customMarkerDna.length > 0 && !customMarkerValid)}
+                  className="w-full bg-gradient-to-r from-red-700 to-rose-600 hover:from-red-600 hover:to-rose-500 text-white py-4 text-base rounded-xl font-bold transition-all disabled:opacity-50 shadow-lg shadow-red-900/30 flex items-center justify-center gap-3">
+                  {isRunning
+                    ? <><span className="animate-spin inline-block">⚙</span> Running search…</>
+                    : <><FlaskConical className="w-5 h-5" /> Compare Both Patients
+                        <span className="text-sm font-normal opacity-70">({nQubits} qubits each)</span>
+                      </>
+                  }
+                </button>
+              </div>
             </div>
           </div>
 
