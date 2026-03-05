@@ -21,6 +21,7 @@ from services.grover import build_grover_circuit, build_grover_step_circuits
 from services.bio_grover import (
     fetch_patient_dna, apply_brca1_mutation, get_marker_seq,
     build_patient_nodes, build_bio_grover_ibm, run_bio_grover_local,
+    build_bio_step_circuits,
     encode_dna, decode_bits,
     MARKER_GENE_NAME, MARKER_VARIANT, MARKER_REGION_DESC, PATIENT_ACCESSION,
 )
@@ -367,6 +368,7 @@ async def bio_grover_local(
         await db.history.insert_one({
             "email":            current_user["sub"],
             "type":             "bio_grover_local",
+            "run_id":           request.run_id,
             "target_bits":      target_bits,
             "measured_state":   sim_result["measured_state"],
             "n_codons":         n_codons,
@@ -461,3 +463,43 @@ async def bio_grover_ibm_submit(
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/quantum-poc/bio-circuit-info")
+async def bio_circuit_info(
+    target_bits: str,
+    n_codons: int = 1,
+    has_mutation: bool = True,
+):
+    """
+    Rebuild the BRCA1 Grover step-circuits for a history entry.
+    Uses the module-level NCBI sequence cache — fast after the first simulation run.
+    target_bits / n_codons / has_mutation are read directly from the stored history record.
+    """
+    if not (1 <= n_codons <= 3):
+        raise HTTPException(status_code=422, detail="n_codons must be 1, 2, or 3.")
+    if not target_bits or not all(c in "01" for c in target_bits):
+        raise HTTPException(status_code=422, detail="target_bits must be a binary string.")
+    if len(target_bits) != n_codons * 6:
+        raise HTTPException(status_code=422, detail=f"target_bits length must be {n_codons * 6} for n_codons={n_codons}.")
+
+    n_qubits = n_codons * 6
+
+    reference_seq = fetch_patient_dna()
+    if not reference_seq:
+        raise HTTPException(status_code=502, detail="Failed to fetch BRCA1 reference from NCBI.")
+
+    patient_seq = apply_brca1_mutation(reference_seq) if has_mutation else reference_seq
+    max_nodes   = min(1 << n_qubits, 4096)
+    use_len     = max_nodes * n_codons * 3
+    patient_nodes = build_patient_nodes(patient_seq[:use_len], n_codons)
+
+    if not patient_nodes:
+        raise HTTPException(status_code=500, detail="Patient node table is empty.")
+
+    try:
+        step_circuits = build_bio_step_circuits(patient_nodes, target_bits)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Circuit build error: {exc}")
+
+    return {"step_circuits": step_circuits, "n_qubits": n_qubits}

@@ -270,11 +270,12 @@ export default function GroverPOC() {
 
     try {
       if (backendType === 'simulator') {
-        // Fire both patient scenarios in parallel
+        // Fire both patient scenarios in parallel; share run_id so history groups them
         const ts = new Date().toISOString();
+        const runId = crypto.randomUUID();
         const [r1, r2] = await Promise.all([
-          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true,  marker_offset: markerOffset, client_timestamp: ts }),
-          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false, marker_offset: markerOffset, client_timestamp: ts }),
+          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true,  marker_offset: markerOffset, client_timestamp: ts, run_id: runId }),
+          api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false, marker_offset: markerOffset, client_timestamp: ts, run_id: runId }),
         ]);
         setCarrierResult(r1.data);
         setHealthyResult(r2.data);
