@@ -223,7 +223,6 @@ export default function GroverPOC() {
     fetchNonce.current += 1;
     setMarkerOffset(0);
     setNearbyWindows([]);
-    setCustomMarkerDna('');
     setMarkerInfo(null);
     setMarkerLoading(false);
   }, [nCodons]);
@@ -237,23 +236,13 @@ export default function GroverPOC() {
   const displayDna  = displayWindow?.dna  ?? markerInfo?.marker_dna  ?? null;
   const displayBits = displayWindow?.bits ?? markerInfo?.marker_bits ?? null;
 
-  // Custom marker state
-  const [useCustomMarker, setUseCustomMarker] = useState(false);
-  const [customMarkerDna, setCustomMarkerDna] = useState('');
+  // Custom marker selection — chosen from NCBI nearby_windows dropdown; '' = auto (hotspot)
+  // Marker selection is handled via markerOffset — no separate customMarkerDna state needed.
 
   const nQubits   = nCodons * 6;
   const maxStates = Math.pow(2, nQubits);
 
-  // Derived: custom marker validation
-  const customMarkerLen   = nCodons * 3;
-  const customMarkerValid = useCustomMarker
-    && customMarkerDna.length === customMarkerLen
-    && /^[AGCT]+$/i.test(customMarkerDna);
-
   const handleRun = async () => {
-    if (useCustomMarker && customMarkerDna.length > 0 && !customMarkerValid) {
-      toast.error(`Custom marker must be exactly ${customMarkerLen} AGCT characters.`); return;
-    }
     setIsRunning(true);
     setCarrierResult(null);
     setHealthyResult(null);
@@ -264,12 +253,9 @@ export default function GroverPOC() {
       // Fire both patient scenarios in parallel; share run_id so history groups them
       const ts = new Date().toISOString();
       const runId = crypto.randomUUID();
-      const extra = (useCustomMarker && customMarkerValid)
-        ? { custom_marker_dna: customMarkerDna.toUpperCase() }
-        : {};
       const [r1, r2] = await Promise.all([
-        api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true,  marker_offset: markerOffset, client_timestamp: ts, run_id: runId, ...extra }),
-        api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false, marker_offset: markerOffset, client_timestamp: ts, run_id: runId, ...extra }),
+        api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: true,  marker_offset: markerOffset, client_timestamp: ts, run_id: runId }),
+        api.post('/search/quantum-poc/bio-local', { n_codons: nCodons, has_mutation: false, marker_offset: markerOffset, client_timestamp: ts, run_id: runId }),
       ]);
       setCarrierResult(r1.data);
       setHealthyResult(r2.data);
@@ -432,42 +418,42 @@ export default function GroverPOC() {
             {/* RIGHT: Custom marker + run */}
             <div className="space-y-5">
 
-              {/* Custom marker input — Step 3 (optional) */}
+              {/* Marker window selector — Step 3 (optional, from NCBI nearby_windows) */}
               <div>
-                <StepBadge n={3} label="Custom marker" done={customMarkerValid} optional />
-                <label className="flex items-center gap-2 text-sm font-medium text-slate-300 mb-3 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={useCustomMarker}
-                    onChange={(e) => { setUseCustomMarker(e.target.checked); if (!e.target.checked) setCustomMarkerDna(''); }}
-                    className="w-4 h-4 accent-amber-500"
-                  />
-                  Custom marker (AGCT)
-                  <span className="text-slate-500 font-normal text-xs">— optional, overrides auto-computed</span>
-                </label>
-                {useCustomMarker && (
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      value={customMarkerDna}
-                      onChange={(e) => setCustomMarkerDna(e.target.value.toUpperCase().replace(/[^AGCT]/g, ''))}
-                      maxLength={customMarkerLen}
-                      placeholder={`${customMarkerLen} nucleotides (A/G/C/T)`}
-                      spellCheck={false}
-                      className="w-full bg-slate-950/60 border border-slate-700 rounded-xl px-4 py-2.5 font-mono text-sm text-emerald-300 uppercase outline-none focus:border-amber-500/60 transition-colors"
-                    />
-                    <div className={`text-xs flex items-center gap-2 ${
-                      customMarkerDna.length === 0 ? 'text-slate-500'
-                        : customMarkerValid ? 'text-emerald-400' : 'text-red-400'
-                    }`}>
-                      <span>{customMarkerDna.length}/{customMarkerLen} nt</span>
-                      {customMarkerDna.length > 0 && (
-                        customMarkerValid
-                          ? <span>✓ valid — will use as Grover search target</span>
-                          : <span>need exactly {customMarkerLen} characters</span>
-                      )}
-                    </div>
+                <StepBadge n={3} label="Select marker window" done={markerOffset !== 0} optional />
+                <p className="text-xs text-slate-400 mb-2">
+                  Choose a DNA window around c.5266dupC as the Grover target
+                  <span className="text-slate-600 ml-1">— optional, defaults to hotspot centre</span>
+                </p>
+                <select
+                  value={String(markerOffset)}
+                  onChange={(e) => setMarkerOffset(parseInt(e.target.value, 10))}
+                  disabled={nearbyWindows.length === 0}
+                  className="w-full bg-slate-950/60 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-200 outline-none focus:border-amber-500/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {nearbyWindows.map((w) => (
+                    <option key={w.offset} value={String(w.offset)}>
+                      {w.offset === 0 ? '★ hotspot (recommended)' : w.offset > 0 ? `node +${w.offset}` : `node ${w.offset}`}
+                      {' · '}{w.dna}{' · '}{w.bits}
+                    </option>
+                  ))}
+                </select>
+                {nearbyWindows.length === 0 ? (
+                  <p className="mt-1.5 text-[11px] text-slate-600 italic">Complete step 2 (Fetch from NCBI) to load options.</p>
+                ) : markerOffset !== 0 ? (
+                  <div className="mt-1.5 flex items-center gap-2 text-xs text-emerald-400">
+                    <span>✓</span>
+                    <span className="font-mono text-red-400 bg-red-950/40 px-1.5 py-0.5 rounded">
+                      {nearbyWindows.find((w) => w.offset === markerOffset)?.dna ?? displayDna}
+                    </span>
+                    <span className="text-slate-500">selected as Grover target</span>
+                    <button
+                      onClick={() => setMarkerOffset(0)}
+                      className="ml-auto text-slate-500 hover:text-red-400 transition-colors text-[11px]"
+                    >✕ reset to auto</button>
                   </div>
+                ) : (
+                  <p className="mt-1.5 text-[11px] text-slate-500">★ hotspot window selected (default).</p>
                 )}
               </div>
 
@@ -475,7 +461,7 @@ export default function GroverPOC() {
               <div>
                 <StepBadge n={4} label="Run quantum search" done={comparisonReady} />
                 <button onClick={handleRun}
-                  disabled={isRunning || (useCustomMarker && customMarkerDna.length > 0 && !customMarkerValid)}
+                  disabled={isRunning}
                   className="w-full bg-gradient-to-r from-red-700 to-rose-600 hover:from-red-600 hover:to-rose-500 text-white py-4 text-base rounded-xl font-bold transition-all disabled:opacity-50 shadow-lg shadow-red-900/30 flex items-center justify-center gap-3">
                   {isRunning
                     ? <><span className="animate-spin inline-block">⚙</span> Running search…</>
@@ -514,8 +500,8 @@ export default function GroverPOC() {
                       This is a real challenge in molecular diagnostics: <strong className="text-amber-300">markers must be long enough to be unique</strong>.
                     </p>
                     <p className="text-amber-300/80 text-xs">
-                      {useCustomMarker
-                        ? '→ Try a different custom marker sequence, or increase the codon count.'
+                      {markerOffset !== 0
+                        ? '→ Try a different marker window, or increase the codon count.'
                         : <><strong>→ Increase to 2 codons (12 qubits)</strong> or <strong>3 codons (18 qubits)</strong> for a marker specific enough to discriminate.</>
                       }
                     </p>
