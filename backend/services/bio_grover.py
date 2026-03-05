@@ -277,7 +277,7 @@ def run_bio_grover_local(
       4. Repeat k = ⌊π/4·√N⌋ times
       5. Sample 'shots' outcomes from |state|²
 
-    Memory: O(2^n) — for n=18 that is 2 MB of complex128. No segfault risk.
+    Memory: O(2^n) — for n=18 that is ~4 MB of complex128. No segfault risk.
     """
     n     = len(target_bits)
     n_max = 1 << n
@@ -304,18 +304,17 @@ def run_bio_grover_local(
     oracle_diag                    = np.ones(n_max, dtype=complex)
     oracle_diag[int(target_bits, 2)] = -1.0
 
-    # Constrained diffusion matrix: 2|ψ₀⟩⟨ψ₀| − I
-    D = 2.0 * np.outer(sv0, sv0.conj()) - np.eye(n_max, dtype=complex)
-
     # Optimal iteration count: k = ⌊π/4 · √N⌋
     k = max(1, floor(pi / 4 * sqrt(N)))
 
     # ── Run Grover iterations ─────────────────────────────────────────────────
+    # Matrix-free constrained diffusion: D·x = 2(ψ₀ᴴ·x)ψ₀ − x
+    # Avoids materialising the O(4^n) matrix — safe for n=18 and beyond.
     t0    = time.perf_counter()
     state = sv0.copy()
     for _ in range(k):
-        state = oracle_diag * state   # Phase oracle  (O(2^n))
-        state = D @ state             # Constrained diffusion  (O(4^n))
+        state = oracle_diag * state                              # Phase oracle  O(2^n)
+        state = 2.0 * np.dot(sv0.conj(), state) * sv0 - state   # Diffusion     O(2^n)
     exec_ms = (time.perf_counter() - t0) * 1000
 
     # ── Sample measurements ───────────────────────────────────────────────────
@@ -386,13 +385,18 @@ def build_bio_step_circuits(
 
     oracle_diag                    = np.ones(n_max, dtype=complex)
     oracle_diag[int(target_bits, 2)] = -1.0
-    D = 2.0 * np.outer(sv0, sv0.conj()) - np.eye(n_max, dtype=complex)
 
-    basis_labels = [format(i, f"0{n}b") for i in range(n_max)]
+    # Matrix-free diffusion: avoids O(4^n) np.outer for large n
+    def _apply_diffusion(x: np.ndarray) -> np.ndarray:
+        return 2.0 * np.dot(sv0.conj(), x) * sv0 - x
 
     def _probs(state: np.ndarray) -> Dict[str, float]:
+        """Return only non-negligible probabilities — keeps JSON small for n=18."""
         p = np.abs(state) ** 2
-        return {label: round(float(p[i]), 6) for i, label in enumerate(basis_labels)}
+        return {
+            format(i, f"0{n}b"): round(float(p[i]), 6)
+            for i in range(n_max) if p[i] > 1e-12
+        }
 
     # ── Compute probability snapshots ─────────────────────────────────────────
     probs_step1 = _probs(sv0)
@@ -400,14 +404,14 @@ def build_bio_step_circuits(
     s2 = oracle_diag * sv0
     probs_step2 = _probs(s2)
 
-    s3 = D @ s2
+    s3 = _apply_diffusion(s2)
     probs_step3 = _probs(s3)
 
     # Step 4: after all k iterations
     state = sv0.copy()
     for _ in range(k):
         state = oracle_diag * state
-        state = D @ state
+        state = _apply_diffusion(state)
     probs_step4 = _probs(state)
 
     # ── Gate diagrams using Qiskit (draw only, no execution) ──────────────────
