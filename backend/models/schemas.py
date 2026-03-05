@@ -101,7 +101,8 @@ class BioQuantumRequest(BaseModel):
     client_timestamp: Optional[str] = None
 
 class BioIBMSubmitRequest(BaseModel):
-    """IBM QPU variant — supports 1–3 codons (6/12/18 qubits)."""
-    n_codons: int = Field(default=1, ge=1, le=3,
-        description="Number of codons per node (1=6 qubits, 2=12 qubits, 3=18 qubits).")
+    """IBM QPU variant — locked to 1 codon (6 qubits). Real QPU noise makes
+    multi-codon circuits (12/18 qubits) unreliable; 6 qubits is the practical max."""
+    n_codons: int = Field(default=1, ge=1, le=1,
+        description="Fixed at 1 codon (6 qubits) — IBM QPU free-tier practical maximum.")
     client_timestamp: Optional[str] = None

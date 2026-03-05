@@ -297,7 +297,7 @@ export default function GroverPOC() {
         setHealthyResult(r2.data);
         setActivePatient('carrier');
       } else {
-        const res = await api.post('/search/quantum-poc/bio-ibm-submit', { n_codons: nCodons, client_timestamp: new Date().toISOString() });
+        const res = await api.post('/search/quantum-poc/bio-ibm-submit', { n_codons: 1, client_timestamp: new Date().toISOString() });
         setIbmJobId(res.data.job_id);
         setIbmJobStatus(res.data.status);
         setIbmBackend(res.data.backend ?? '');
