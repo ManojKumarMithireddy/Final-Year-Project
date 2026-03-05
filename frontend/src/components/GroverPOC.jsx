@@ -50,7 +50,7 @@ function PipelineStep({ n, label, type, done, optional, locked, last, children }
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: isLocked ? 0.35 : 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className={`flex-1 rounded-2xl border p-5 mb-6 ${
+        className={`flex-1 min-w-0 rounded-2xl border p-5 mb-6 ${
           done     ? 'border-emerald-900/50 bg-emerald-950/10'
         : isLocked ? 'border-slate-800/40  bg-slate-950/10 pointer-events-none'
         :            'border-slate-700/50  bg-slate-900/40'
@@ -325,7 +325,7 @@ export default function GroverPOC() {
   const comparisonReady = carrierResult && healthyResult;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-4">
+    <div className="w-full max-w-4xl mx-auto space-y-4">
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="bg-slate-900/60 rounded-3xl px-8 py-6 border border-slate-800 shadow-2xl backdrop-blur-md flex items-center gap-4">
@@ -375,12 +375,22 @@ export default function GroverPOC() {
           <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3 text-sm">
             <div className="flex items-center justify-between">
               <div className="text-xs font-medium text-slate-400 uppercase tracking-widest">NCBI Data Sources</div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-blue-400 shrink-0">🧬</span>
+                <div>
+                  <span className="text-slate-300 font-medium">Patient: </span>
+                  <span className="font-mono text-blue-300">NM_007294.4</span>
+                  <span className="text-slate-500 ml-1 text-xs">(BRCA1 mRNA from NCBI)</span>
+                </div>
+              </div>
               {!markerInfo ? (
                 <button
                   onClick={() => fetchMarker(nCodons, false, 0)}
                   disabled={markerLoading}
                   title="Fetch BRCA1 marker window from NCBI"
-                  className="flex items-center gap-1.5 text-xs bg-amber-500/20 border border-amber-500/50 text-amber-300 hover:bg-amber-500/30 px-2.5 py-1 rounded-lg transition-all disabled:opacity-40 font-medium"
+                  className="flex items-center gap-1.5 text-xs bg-amber-500/20 border border-amber-500/50 text-amber-300 hover:bg-amber-500/30 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-40 font-medium shrink-0"
                 >
                   <RotateCcw className={`w-3 h-3 ${markerLoading ? 'animate-spin' : ''}`} />
                   {markerLoading ? 'Fetching…' : 'Fetch from NCBI'}
@@ -400,20 +410,12 @@ export default function GroverPOC() {
                   }}
                   disabled={markerLoading}
                   title="Cycle to next node window around c.5266dupC hotspot"
-                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-amber-400 transition-colors disabled:opacity-40"
+                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-amber-400 transition-colors disabled:opacity-40 shrink-0"
                 >
                   <RotateCcw className={`w-3 h-3 ${markerLoading ? 'animate-spin' : ''}`} />
                   {markerLoading ? 'Fetching…' : `Refresh marker${markerOffset !== 0 ? ` (${markerOffset > 0 ? '+' : ''}${markerOffset})` : ''}`}
                 </button>
               )}
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="text-blue-400 shrink-0">🧬</span>
-              <div>
-                <span className="text-slate-300 font-medium">Patient: </span>
-                <span className="font-mono text-blue-300">NM_007294.4</span>
-                <span className="text-slate-500 ml-1 text-xs">(BRCA1 mRNA from NCBI)</span>
-              </div>
             </div>
             <div className="flex items-start gap-2">
               <span className="text-red-400 shrink-0">🎯</span>
