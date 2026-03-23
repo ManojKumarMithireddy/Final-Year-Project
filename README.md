@@ -18,25 +18,47 @@ A full-stack, production-patterned web application demonstrating a **hybrid clas
 
 ## Architecture
 
-```
+```text
 bioquantum_hybrid_search/
 ├── backend/              # FastAPI (Python)
-│   ├── main.py           # All API endpoints, Grover circuit, search logic
-│   ├── auth.py           # Google OAuth, bcrypt, JWT
+│   ├── main.py           # App factory & Uvicorn entrypoint (run `python main.py`)
+│   ├── auth.py           # JWT and password hashing logic
+│   ├── crypto.py         # PIR OTP-XOR encryption
 │   ├── db.py             # MongoDB async client (Motor)
-│   ├── tests/
-│   │   └── test_core.py  # 5 unit tests (pytest)
+│   ├── email_service.py  # Brevo API email integration
+│   ├── rate_limit.py     # SlowAPI rate limiting configuration
+│   ├── models/           # Data validation and database schemas
+│   │   └── schemas.py    # Pydantic models
+│   ├── routers/          # Modular API endpoints
+│   │   ├── auth.py       # Login, register, Google OAuth
+│   │   ├── credentials.py# IBM credential management
+│   │   ├── quantum.py    # Grover endpoints & IBM submission
+│   │   ├── search.py     # Classical search endpoints
+│   │   └── user.py       # History and user profile endpoints
+│   ├── services/         # Core business logic
+│   │   ├── bio_grover.py # DNA sequence to quantum circuit mapping
+│   │   ├── grover.py     # Underlying Qiskit circuit building
+│   │   └── ncbi.py       # Biopython Entrez API fetch
+│   ├── tests/            # Unit testing
+│   │   └── test_core.py  # Pytest core logic tests
 │   └── venv/             # Python virtual environment (not committed)
 └── frontend/             # React + Vite + TailwindCSS
     └── src/
-        ├── pages/
-        │   ├── Dashboard.jsx   # Tab router (60 lines)
-        │   ├── Login.jsx       # Auth page (Google + Email/Password)
-        │   └── History.jsx     # Quantum job history
-        └── components/
-            ├── HybridSearchPanel.jsx  # Tab 1: NCBI fetch + classical/quantum metrics
-            ├── GroverPOC.jsx          # Tab 2: Blind Grover circuit + PIR pipeline
-            └── ComplexityChart.jsx    # Recharts O(N) vs O(√N) line chart
+        ├── pages/        # Main route views
+        │   ├── Dashboard.jsx     # Tabbed router interface
+        │   ├── History.jsx       # Quantum job history
+        │   ├── Login.jsx         # Auth page (Google + Email)
+        │   ├── ResetPassword.jsx # Password recovery
+        │   └── VerifyEmail.jsx   # Email verification logic
+        └── components/   # UI Building Blocks
+            ├── AmplitudeChart.jsx      # Dynamic Statevector probability visualization
+            ├── BackendSleepBanner.jsx  # Cold start notification for free-tier hosting
+            ├── ComplexityChart.jsx     # Recharts O(N) vs O(√N) line chart
+            ├── ErrorBoundary.jsx       # Global React error boundaries
+            ├── GroverPOC.jsx           # Main Interactive Grover circuit & PIR pipeline
+            ├── GroverStepNavigator.jsx # Step-by-step interactive circuit composition
+            ├── HybridSearchPanel.jsx   # NCBI fetch + classical/quantum comparison
+            └── SessionTimeoutModal.jsx # Secure session auto-logout management
 ```
 
 ---
@@ -80,8 +102,8 @@ GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
 ```
 
 ```powershell
-# Start the backend
-.\venv\Scripts\uvicorn main:app --reload --port 8000
+# Start the backend API server locally (Uvicorn starts automatically)
+python main.py
 ```
 
 ### 2. Frontend
@@ -130,14 +152,15 @@ tests/test_core.py::test_accession_sanitization        PASSED
 
 | Feature | Description |
 |---------|-------------|
-| **NCBI Integration** | Live DNA sequences via Biopython `Entrez.efetch` (up to 100,000 bases) |
+| **NCBI Integration** | Live DNA sequences via Biopython `Entrez.efetch` |
 | **Classical Search** | Timed O(N) sliding-window search in Python |
-| **Quantum Theory** | Theoretical O(√N) Grover metrics for comparison (analytically derived) |
-| **Grover POC** | Executable Grover circuit on local Aer simulator or IBM Cloud QPU |
+| **Modular Backend** | Clean FastAPI architecture (split into routers, models, services) |
+| **Grover POC & PIR** | Executable Grover circuit with OTP-XOR client-side blind querying |
+| **Circuit UI** | Step-by-step interactive composition with ASCII visualization & explanations |
+| **Amplitude Viz** | Dynamic statevector simulation displaying basis state probabilities |
 | **Noise Model** | Optional depolarizing noise (0–5%) on local simulator to model NISQ hardware |
-| **PIR Demonstration** | OTP-XOR client-side encryption before circuit submission |
-| **Dual Auth** | Google OAuth 2.0 + Email/Password (bcrypt + JWT) |
-| **IBM Security** | IBM API credentials stored server-side; never relayed in circuit requests |
+| **UX & Security** | Modern UI with session timeouts, loaders, and dual auth (Google OAuth + JWT) |
+| **IBM Security** | IBM API credentials stored safely server-side |
 
 ---
 
