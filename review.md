@@ -24,7 +24,7 @@
 
 ## 1. Executive Summary
 
-BioQuantum is a well-structured full-stack educational project that demonstrates a hybrid classical/quantum approach to genomic sequence search, pairing real NCBI sequence fetching, local Aer simulation, and optional IBM Cloud QPU execution with a polished React SPA.
+BioQuantum is a well-structured full-stack educational project that demonstrates a hybrid classical/quantum approach to genomic sequence search, pairing real NCBI sequence fetching, local Aer simulation, and a polished React SPA.
 
 The codebase shows **good engineering instincts**: proper router/service separation, async MongoDB via Motor, itsdangerous-signed email verification, a custom session-timeout hook, and meaningful inline documentation. The visual layer (Framer Motion animations, Recharts, dark theme) is consistently well-crafted.
 
@@ -44,7 +44,7 @@ bioquantum_hybrid_search/
 │   ├── db.py                 # Motor client singleton
 │   ├── email_service.py      # Brevo transactional email
 │   ├── models/schemas.py     # Pydantic request models
-│   ├── routers/              # auth · search · quantum · credentials · user
+│   ├── routers/              # auth · search · quantum · user
 │   ├── services/             # grover.py · ncbi.py
 │   └── tests/test_core.py    # Pytest unit tests
 └── frontend/                 # Vite + React SPA
@@ -85,41 +85,7 @@ The fallback string is committed to version control. Any developer who doesn't s
 jwt_secret = os.environ["JWT_SECRET"]   # fail fast, no default
 ```
 
-#### 3.2 IBM API key returned in plaintext to the frontend (`routers/credentials.py`)
-
-```python
-# GET /api/credentials — returns raw key
-return creds   # includes ibm_api_key, ibm_crn
-```
-
-The IBM Cloud API key is fetched only to pre-fill the frontend form so the user knows a key is saved. It should never leave the server. Return a redacted sentinel instead:
-
-```python
-return {
-    "ibm_api_key": "••••••••" if creds.get("ibm_api_key") else "",
-    "ibm_crn": creds.get("ibm_crn", ""),
-}
-```
-
-#### 3.3 IBM credentials encrypted at rest — `FERNET_KEY` silent failure ✅ / ⚠️
-
-Fernet symmetric encryption (`crypto.py`) was added for IBM credentials at rest — a good improvement. However, there is a **silent no-op** path:
-
-```python
-# crypto.py
-if not FERNET_KEY:
-    logger.warning("FERNET_KEY not set — credentials stored unencrypted")
-    return plaintext   # silently falls through
-```
-
-If `FERNET_KEY` is misconfigured in production (typo, missing env var), credentials are stored in plaintext with only a log warning. This should be a hard failure:
-
-```python
-if not FERNET_KEY:
-    raise RuntimeError("FERNET_KEY environment variable is required for credential storage.")
-```
-
-#### 3.4 Token in `localStorage` — XSS exposure (`App.jsx`, `lib/api.js`)
+#### 3.2 Token in `localStorage` — XSS exposure (`App.jsx`, `lib/api.js`)
 
 JWTs in `localStorage` are readable by any JavaScript running on the page, including injected scripts. The preferred pattern for web apps is `httpOnly` cookies, which are inaccessible to JS. This requires a small backend change (`set-cookie` on login) and removing the `Authorization` header injection from `api.js`, but significantly raises the XSS bar.
 
@@ -127,16 +93,15 @@ JWTs in `localStorage` are readable by any JavaScript running on the page, inclu
 
 ### 🟠 High
 
-#### 3.5 Rate limiting added to auth — not on quantum endpoints ✅ / ⚠️
+#### 3.3 Rate limiting added to auth — not on quantum endpoint ✅ / ⚠️
 
-`slowapi` rate limiting was correctly added to `/api/auth/login` and `/api/auth/register` — good. However, the **quantum endpoints are unprotected**:
+`slowapi` rate limiting was correctly added to `/api/auth/login` and `/api/auth/register` — good. However, the **quantum endpoint is unprotected**:
 
 - `POST /quantum-poc/bio-local` triggers an NCBI HTTP fetch + heavy numpy matrix operations
-- `POST /quantum-poc/bio-ibm-submit` stores credentials and queues IBM QPU jobs
 
-A single user can hammer these endpoints, exhausting NCBI API quotas or queuing many IBM jobs. Add `@limiter.limit("3/minute")` to both quantum routes.
+A single user can hammer this endpoint, exhausting NCBI API quotas. Add `@limiter.limit("3/minute")` to the quantum route.
 
-#### 3.6 No email format validation in `StandardAuthRequest`
+#### 3.4 No email format validation in `StandardAuthRequest`
 
 The `email` field is a plain `str`. Pydantic has a built-in `EmailStr` type (already imported as a dependency via `email-validator`). A malformed email would be registered, then the verification link would go nowhere.
 
@@ -147,7 +112,7 @@ class StandardAuthRequest(BaseModel):
     ...
 ```
 
-#### 3.7 Password strength enforced in the router, not the schema
+#### 3.5 Password strength enforced in the router, not the schema
 
 Password complexity checks happen inside `routers/auth.py` at runtime, but the `StandardAuthRequest` schema accepts any string. Move enforcement to the Pydantic model with a `@field_validator` so it is consistently applied everywhere the schema is used and appears in the OpenAPI docs.
 
@@ -155,11 +120,11 @@ Password complexity checks happen inside `routers/auth.py` at runtime, but the `
 
 ### 🟡 Medium
 
-#### 3.8 `get_history` exposes the user's `email` field in every history record
+#### 3.6 `get_history` exposes the user's `email` field in every history record
 
 `routers/user.py` returns history documents with `{"_id": 0}` — email is still included. If the history API is ever shared or logged, it leaks PII. Add `"email": 0` to the projection.
 
-#### 3.9 No HTTPS enforcement / security headers
+#### 3.7 No HTTPS enforcement / security headers
 
 No `Strict-Transport-Security`, `X-Content-Type-Options`, or `Content-Security-Policy` headers. For production, add `starlette-trustedhost` and a security-header middleware (or sit behind a reverse proxy that adds them).
 
@@ -213,11 +178,7 @@ The file contains 55+ packages including transitive/platform dependencies (`colo
 - `requirements.txt` — direct deps only (fastapi, motor, qiskit, etc.)
 - `requirements-lock.txt` or use `pip-tools` / `poetry`
 
-### 4.6 `qiskit-ibm-runtime` not in `requirements.txt`
-
-The IBM Cloud path (`routers/quantum.py`) gracefully handles a missing import, but the package is not listed in requirements — a developer who wants to use IBM hardware has no guidance. Add it as an optional extra with a comment.
-
-### 4.7 Duplicate `dna_to_bits` function
+### 4.6 Duplicate `dna_to_bits` function
 
 The same function exists in `services/ncbi.py` and is duplicated inline in `tests/test_core.py` (with a comment explaining why). It also exists as `dnaToBits` in the frontend. The backend copy should live in a shared `utils.py` and be imported by both `ncbi.py` and tested directly.
 
@@ -240,10 +201,9 @@ const id = item._id || item.timestamp;
 
 ### 5.3 `GroverPOC.jsx` is 819 lines
 
-This single component handles dataset generation, qubit/noise controls, IBM credential management, session submission, step-by-step circuit navigation, OTP encryption display, and amplitude charting. It should be decomposed:
+This single component handles dataset generation, qubit/noise controls, session submission, step-by-step circuit navigation, OTP encryption display, and amplitude charting. It should be decomposed:
 
-- `GroverControls.jsx` — qubit, target, noise, backend selectors
-- `IBMCredentialsPanel.jsx` — already a logical sub-unit
+- `GroverControls.jsx` — qubit, target, noise selectors
 - `PIRPipeline.jsx` — the three-step encrypt/run/decrypt visualisation
 - `CircuitNavigator.jsx` — step tabs + diagram + AmplitudeChart (could be shared with History)
 
@@ -366,15 +326,7 @@ diff = QuantumCircuit(n, name="C-Diff\n2|ψ₀⟩⟨ψ₀|−I")
 qc3.append(diff.to_gate(), range(n))
 ```
 
-### 🟠 7.4 IBM QPU path uses unconstrained Grover (conceptual mismatch with UI)
-
-`_build_grover_circuit_standard` initialises with `qc.h(range(n))` — a standard uniform superposition over all 2^n states, NOT the constrained DNA-node subspace. The UI labels this "Constrained Grover Search" without qualification.
-
-The oracle is correct (marks the target), but the initialisation and diffuser are unconstrained. The quantum circuit is therefore NOT the same algorithm as the local simulation.
-
-**Fix:** Add a clear disclaimer in the IBM UI panel: "IBM QPU uses standard Grover initialisation (H⊗ⁿ) over all 2^n states; the constrained DNA-node subspace is only used in the local simulator."
-
-### 🟠 7.5 `MARKER_ACCESSION` constant is dead code
+### 🟠 7.4 `MARKER_ACCESSION` constant is dead code
 
 ```python
 # bio_grover.py line 56
@@ -383,7 +335,7 @@ MARKER_ACCESSION = "NM_007294.4"  # ← never used anywhere
 
 `fetch_disease_marker()` was removed when the marker was changed to be derived from the mutant sequence in-memory. The constant is a stale leftover that adds confusion.
 
-### 🟡 7.6 `requirements.txt` has duplicate `slowapi` entry
+### 🟡 7.5 `requirements.txt` has duplicate `slowapi` entry
 
 ```
 # lines 49 and 51
@@ -394,21 +346,13 @@ slowapi==0.1.9
 
 Harmless but sloppy. Remove one entry.
 
-### 🟡 7.7 `qiskit-ibm-runtime` is unpinned
-
-```
-qiskit-ibm-runtime>=0.20.0
-```
-
-All other dependencies use exact pinned versions. An unpinned `>=` constraint will silently upgrade to a future breaking version. Pin it: `qiskit-ibm-runtime==0.20.0` (or latest tested version).
-
-### 🟡 7.8 No NCBI rate limiting or retry backoff
+### 🟡 7.6 No NCBI rate limiting or retry backoff
 
 NCBI Entrez allows maximum 3 requests/second unauthenticated (10/sec with API key). There is no `time.sleep` between calls, no retry/backoff logic, and no `NCBI_API_KEY` support. Rapid test runs or multiple concurrent users could trigger `429` responses from NCBI, which currently propagate as opaque 502 errors.
 
 **Fix:** Add `Entrez.api_key = os.getenv("NCBI_API_KEY")` and a simple exponential backoff wrapper around `_ncbi_fetch`.
 
-### 🟡 7.9 `detection_result` uses most-frequent bitstring, not probability threshold
+### 🟡 7.7 `detection_result` uses most-frequent bitstring, not probability threshold
 
 ```python
 measured = max(counts, key=counts.get)
@@ -419,7 +363,7 @@ If the healthy patient happens to produce target_bits as the most frequent shot 
 
 **Fix:** Add a minimum confidence threshold (e.g., `conf >= 0.15`) before classifying as `FOUND`, or surface both `measured == target_bits` and the confidence value more prominently in the UI so users understand low-confidence results.
 
-### 🟢 7.10 Biological framing is now correct (positive note)
+### 🟢 7.8 Biological framing is now correct (positive note)
 
 The `apply_brca1_mutation` → `get_marker_seq` pipeline correctly:
 - Simulates c.5266dupC by inserting a C at 0-based index 5266
@@ -488,7 +432,6 @@ There are no tests that spin up a `TestClient` and exercise the HTTP layer. Fast
 ```
 MONGODB_URI=mongodb://localhost:27017
 JWT_SECRET=                    # required — generate with: openssl rand -hex 32
-FERNET_KEY=                    # required — generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 GOOGLE_CLIENT_ID=              # from Google Cloud Console
 BREVO_API_KEY=                 # from Brevo dashboard
 BREVO_SENDER_EMAIL=            # verified sender address
@@ -514,18 +457,14 @@ VITE_GOOGLE_CLIENT_ID=         # same as backend GOOGLE_CLIENT_ID
 - [x] **[BioQuantum]** Replace dense `D @ state` with `2·⟨ψ₀|state⟩·sv0 − state` in both `run_bio_grover_local` and `build_bio_step_circuits` — eliminates OOM crash for `n_codons=3`
 - [ ] **[BioQuantum]** Remove `build_bio_step_circuits` call from inside `run_bio_grover_local` return dict — currently rebuilds all operators twice per request
 - [x] Remove hardcoded `JWT_SECRET` default; raise `KeyError` on missing env var
-- [x] Redact IBM API key in `GET /api/credentials` response (return `••••••••` if set)
-- [ ] Harden `FERNET_KEY` missing: raise `RuntimeError` instead of silent no-op
-- [x] Add `.env.example` for both backend and frontend (including `FERNET_KEY`)
+- [x] Add `.env.example` for both backend and frontend
 
 ### P1 — High / Fix before adding features
 
 - [ ] **[BioQuantum]** Fix Step 3 circuit diagram in `build_bio_step_circuits`: replace standard H diffuser with named black-box `C-Diff 2|ψ₀⟩⟨ψ₀|−I` gate
-- [ ] **[BioQuantum]** Add IBM QPU disclaimer in UI: "IBM path uses unconstrained H⊗ⁿ initialisation"
 - [ ] **[BioQuantum]** Remove dead `MARKER_ACCESSION` constant from `bio_grover.py`
 - [ ] **[BioQuantum]** Remove duplicate `slowapi==0.1.9` from `requirements.txt`
-- [ ] **[BioQuantum]** Pin `qiskit-ibm-runtime` to exact version in `requirements.txt`
-- [ ] Add `@limiter.limit("3/minute")` to quantum endpoints (`/bio-local`, `/bio-ibm-submit`)
+- [ ] Add `@limiter.limit("3/minute")` to quantum endpoint (`/bio-local`)
 - [x] Switch `email` field to `EmailStr` in `StandardAuthRequest`
 - [x] Move password-strength validation into a Pydantic `@field_validator`
 - [x] Add `"email": 0` projection in `get_history`
@@ -557,10 +496,10 @@ VITE_GOOGLE_CLIENT_ID=         # same as backend GOOGLE_CLIENT_ID
 | Dimension                                 | Score      | Notes                                                                    |
 | ----------------------------------------- | ---------- | ------------------------------------------------------------------------ |
 | **Architecture / Separation of concerns** | 8 / 10     | Clean router→service split; DB DI could be improved                      |
-| **Security**                              | 5 / 10     | Fernet + rate limiting added; JWT secret default + credential redaction remain |
+| **Security**                              | 6 / 10     | Rate limiting added; JWT secret default remains |
 | **Backend code quality**                  | 7 / 10     | Readable, well-commented; duplicate operators in bio layer                |
 | **Frontend code quality**                 | 7 / 10     | Polished dual-patient UI; step diagram mismatch; GroverPOC too large      |
-| **Quantum implementation**                | 6 / 10     | Correct constrained Grover math; OOM risk at n=18; IBM/local inconsistency |
+| **Quantum implementation**                | 7 / 10     | Correct constrained Grover math; OOM risk at n=18 |
 | **Biological framing**                    | 7 / 10     | Carrier vs. healthy control is now correct; marker specificity well handled |
 | **Testing**                               | 4 / 10     | Unit tests exist; no bio-grover or integration tests                      |
 | **DevOps / Deployability**                | 7 / 10     | CI/CD and Dockerfile in place; missing `.env.example`, no Docker Compose  |
