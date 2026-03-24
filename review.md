@@ -511,12 +511,12 @@ VITE_GOOGLE_CLIENT_ID=         # same as backend GOOGLE_CLIENT_ID
 
 ### P0 — Critical / Fix immediately
 
-- [ ] **[BioQuantum]** Replace dense `D @ state` with `2·⟨ψ₀|state⟩·sv0 − state` in both `run_bio_grover_local` and `build_bio_step_circuits` — eliminates OOM crash for `n_codons=3`
+- [x] **[BioQuantum]** Replace dense `D @ state` with `2·⟨ψ₀|state⟩·sv0 − state` in both `run_bio_grover_local` and `build_bio_step_circuits` — eliminates OOM crash for `n_codons=3`
 - [ ] **[BioQuantum]** Remove `build_bio_step_circuits` call from inside `run_bio_grover_local` return dict — currently rebuilds all operators twice per request
-- [ ] Remove hardcoded `JWT_SECRET` default; raise `KeyError` on missing env var
-- [ ] Redact IBM API key in `GET /api/credentials` response (return `••••••••` if set)
+- [x] Remove hardcoded `JWT_SECRET` default; raise `KeyError` on missing env var
+- [x] Redact IBM API key in `GET /api/credentials` response (return `••••••••` if set)
 - [ ] Harden `FERNET_KEY` missing: raise `RuntimeError` instead of silent no-op
-- [ ] Add `.env.example` for both backend and frontend (including `FERNET_KEY`)
+- [x] Add `.env.example` for both backend and frontend (including `FERNET_KEY`)
 
 ### P1 — High / Fix before adding features
 
@@ -526,22 +526,22 @@ VITE_GOOGLE_CLIENT_ID=         # same as backend GOOGLE_CLIENT_ID
 - [ ] **[BioQuantum]** Remove duplicate `slowapi==0.1.9` from `requirements.txt`
 - [ ] **[BioQuantum]** Pin `qiskit-ibm-runtime` to exact version in `requirements.txt`
 - [ ] Add `@limiter.limit("3/minute")` to quantum endpoints (`/bio-local`, `/bio-ibm-submit`)
-- [ ] Switch `email` field to `EmailStr` in `StandardAuthRequest`
-- [ ] Move password-strength validation into a Pydantic `@field_validator`
-- [ ] Add `"email": 0` projection in `get_history`
+- [x] Switch `email` field to `EmailStr` in `StandardAuthRequest`
+- [x] Move password-strength validation into a Pydantic `@field_validator`
+- [x] Add `"email": 0` projection in `get_history`
 
 ### P2 — Medium / Quality of life
 
 - [ ] **[BioQuantum]** Add `NCBI_API_KEY` support and exponential backoff retry to `_ncbi_fetch`
 - [ ] **[BioQuantum]** Add confidence threshold (e.g. ≥15%) before classifying as `FOUND`
 - [ ] **[BioQuantum]** Add unit tests for `apply_brca1_mutation`, `get_marker_seq`, `run_bio_grover_local`
-- [ ] Fix History `key` prop — include `_id` (as string) in history API response
-- [ ] Add error state in History when `circuit-info` request fails
-- [ ] Add `conftest.py` and remove `sys.path.insert` from test file
+- [x] Fix History `key` prop — include `_id` (as string) in history API response
+- [x] Add error state in History when `circuit-info` request fails
+- [x] Add `conftest.py` and remove `sys.path.insert` from test file
 - [ ] Add `TestClient`-based integration tests for auth + bio-local endpoints
-- [ ] Add Vite dev proxy to remove CORS friction in local dev
+- [x] Add Vite dev proxy to remove CORS friction in local dev
 - [ ] Split `GroverPOC.jsx` into sub-components
-- [ ] Add `AbortController` to `HybridSearchPanel` fetch
+- [x] Add `AbortController` to `HybridSearchPanel` fetch
 
 ### P3 — Low / Production hardening
 
